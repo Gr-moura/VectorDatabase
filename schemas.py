@@ -75,19 +75,6 @@ class Document(DocumentBase):
 
 
 # ============================================================================
-# LIBRARY INDEX MODEL
-# ============================================================================
-
-
-class LibraryIndex(BaseModel):
-    total_documents: int = 0
-    total_chunks: int = 0
-    document_names: Dict[UUID, str] = Field(default_factory=dict)
-    chunk_texts: Dict[UUID, Dict[UUID, str]] = Field(default_factory=dict)
-    embeddings: Dict[UUID, Dict[UUID, List[float]]] = Field(default_factory=dict)
-
-
-# ============================================================================
 # LIBRARY MODELS
 # ============================================================================
 
@@ -120,9 +107,6 @@ class Library(LibraryBase):
     documents: Dict[UUID, Document] = Field(
         default_factory=dict, description="Dictionary of documents indexed by UID"
     )
-    index: Optional[LibraryIndex] = Field(
-        None, description="Search index for the library contents"
-    )
 
 
 # ============================================================================
@@ -144,8 +128,3 @@ class DocumentResponse(Document):
 
 
 LibraryResponse = Library
-
-
-class IndexResponse(BaseModel):
-    library_uid: UUID
-    index: LibraryIndex

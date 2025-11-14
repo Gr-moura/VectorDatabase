@@ -1,0 +1,147 @@
+from pydantic import BaseModel, Field, conlist
+from typing import Optional, Dict, List, Any
+
+class MetadataBase(BaseModel):
+	"""Common schema for Metadata."""
+
+	info: Optional[Dict[str, Any]] = Field(
+		default=None, description="Optional metadata information."
+	)
+
+# --- 1. Base Models ---
+
+
+class ChunkBase(BaseModel):
+    """Common schema for Chunk content and metadata."""
+
+    content: str = Field(..., description="The textual content of the chunk.")
+    metadata: MetadataBase = Field(
+
+
+class DocumentBase(BaseModel):
+    """Common schema for Document metadata."""
+
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Optional descriptive data for the document."
+    )
+
+
+class LibraryBase(BaseModel):
+    """Common schema for Library identifier and metadata."""
+
+    library_name: str = Field(
+        ..., description="Unique name/identifier for the library."
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Optional descriptive data for the library."
+    )
+
+
+# --- 2. Create Models (API Input) ---
+
+
+class ChunkCreate(ChunkBase):
+    """Input model for creating a new Chunk. Requires embedding."""
+
+    # Must be present upon creation for indexing.
+    embedding: conlist(float, min_items=1) = Field(
+        ..., description="Vector embedding of the content (list of floats)."
+    )
+
+
+class DocumentCreate(DocumentBase):
+    """Input model for creating a new Document. Requires chunks."""
+
+    # Documents are created along with their constituent chunks.
+    chunks: conlist(ChunkCreate, min_items=1) = Field(
+        ..., description="List of ChunkCreate objects."
+    )
+
+
+class LibraryCreate(LibraryBase):
+    """Input model for creating a new Library. Requires documents."""
+
+    # Libraries are created along with their constituent documents.
+    documents: conlist(DocumentCreate, min_items=1) = Field(
+        ..., description="List of DocumentCreate objects."
+    )
+
+
+# --- 3. Read Models (API Output) ---
+
+
+class ChunkRead(ChunkCreate):
+    """Output model for reading a Chunk. Includes the system ID."""
+
+    chunk_id: str = Field(
+        ..., description="Unique system-generated identifier for the chunk."
+    )
+
+    # Configuration for immutability and ORM mode if reading from a database
+    class Config:
+        frozen = True
+        from_attributes = True
+
+
+class DocumentRead(DocumentBase):
+    """Output model for reading a Document. Includes the system ID and read chunks."""
+
+    document_id: str = Field(
+        ..., description="Unique system-generated identifier for the document."
+    )
+    chunks: conlist(ChunkRead, min_items=1) = Field(
+        ..., description="List of ChunkRead objects."
+    )
+
+    class Config:
+        frozen = True
+        from_attributes = True
+
+
+class LibraryRead(LibraryBase):
+    """Output model for reading a Library. Includes the read documents."""
+
+    documents: conlist(DocumentRead, min_items=1) = Field(
+        ..., description="List of DocumentRead objects."
+    )
+
+    class Config:
+        frozen = True
+        from_attributes = True
+
+
+# --- 4. Update Models (API Input for PATCH/PUT) ---
+
+
+class ChunkUpdate(ChunkBase):
+    """Input model for updating a Chunk (PATCH/PUT). All fields are optional."""
+
+    content: Optional[str] = Field(None, description="New textual content.")
+    metadata: Optional[Dict[str, Any]] = Field(
+        None, description="New optional metadata."
+    )
+    # Embedding updates may be restricted depending on implementation,
+    # but defined here for flexibility.
+    embedding: Optional[conlist(float, min_items=1)] = Field(
+        None, description="New vector embedding."
+    )
+
+
+class DocumentUpdate(DocumentBase):
+    """Input model for updating a Document. All fields are optional."""
+
+    metadata: Optional[Dict[str, Any]] = Field(
+        None, description="New optional metadata."
+    )
+    # Note: Updating the list of chunks should typically be handled by separate chunk-specific endpoints (CRUD on chunks).
+
+
+class LibraryUpdate(LibraryBase):
+    """Input model for updating a Library. All fields are optional."""
+
+    library_name: Optional[str] = Field(
+        None, description="New unique name/identifier for the library."
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None, description="New optional metadata."
+    )

@@ -39,7 +39,6 @@ class LibraryService:
         for field, value in update_data.items():
             setattr(library, field, value)
 
-        library.updated_at = datetime.utcnow()
         return library
 
     def delete_library(self, library_uid: UUID) -> bool:
@@ -67,7 +66,6 @@ class LibraryService:
 
         document = Document(**doc_create.model_dump())
         library.documents[document.uid] = document
-        library.updated_at = datetime.utcnow()
 
         # Update index if it exists
         if library.index:
@@ -96,13 +94,9 @@ class LibraryService:
         for field, value in update_data.items():
             setattr(document, field, value)
 
-        document.updated_at = datetime.utcnow()
-        library.updated_at = datetime.utcnow()
-
         # Update index if it exists
         if library.index and "name" in update_data:
             library.index.document_names[doc_uid] = document.name
-            library.index.last_indexed = datetime.utcnow()
 
         return document
 
@@ -113,7 +107,6 @@ class LibraryService:
             return False
 
         del library.documents[doc_uid]
-        library.updated_at = datetime.utcnow()
 
         # Update index if it exists
         if library.index:
@@ -142,11 +135,9 @@ class LibraryService:
 
         chunk = Chunk(**chunk_create.model_dump())
         document.chunks[chunk.uid] = chunk
-        document.updated_at = datetime.utcnow()
 
         library = self.get_library(library_uid)
         if library:
-            library.updated_at = datetime.utcnow()
             # Update index if it exists
             if library.index:
                 self._update_index_for_chunk_add(library, doc_uid, chunk)
@@ -180,12 +171,8 @@ class LibraryService:
         for field, value in update_data.items():
             setattr(chunk, field, value)
 
-        chunk.updated_at = datetime.utcnow()
-        document.updated_at = datetime.utcnow()
-
         library = self.get_library(library_uid)
         if library:
-            library.updated_at = datetime.utcnow()
             # Update index if it exists
             if library.index:
                 self._update_index_for_chunk_update(library, doc_uid, chunk)
@@ -199,11 +186,9 @@ class LibraryService:
             return False
 
         del document.chunks[chunk_uid]
-        document.updated_at = datetime.utcnow()
 
         library = self.get_library(library_uid)
         if library:
-            library.updated_at = datetime.utcnow()
             # Update index if it exists
             if library.index:
                 self._update_index_for_chunk_delete(library, doc_uid, chunk_uid)
@@ -230,7 +215,6 @@ class LibraryService:
         index = LibraryIndex(
             total_documents=len(library.documents),
             total_chunks=sum(len(doc.chunks) for doc in library.documents.values()),
-            last_indexed=datetime.utcnow(),
         )
 
         for doc_uid, document in library.documents.items():
@@ -259,7 +243,6 @@ class LibraryService:
         library.index.document_names[document.uid] = document.name
         library.index.chunk_texts[document.uid] = {}
         library.index.embeddings[document.uid] = {}
-        library.index.last_indexed = datetime.utcnow()
 
     def _update_index_for_document_delete(self, library: Library, doc_uid: UUID):
         """Update index when a document is deleted."""
@@ -274,7 +257,6 @@ class LibraryService:
             del library.index.chunk_texts[doc_uid]
         if doc_uid in library.index.embeddings:
             del library.index.embeddings[doc_uid]
-        library.index.last_indexed = datetime.utcnow()
 
     def _update_index_for_chunk_add(
         self, library: Library, doc_uid: UUID, chunk: Chunk
@@ -291,7 +273,6 @@ class LibraryService:
         library.index.chunk_texts[doc_uid][chunk.uid] = chunk.text
         if chunk.embedding:
             library.index.embeddings[doc_uid][chunk.uid] = chunk.embedding
-        library.index.last_indexed = datetime.utcnow()
 
     def _update_index_for_chunk_update(
         self, library: Library, doc_uid: UUID, chunk: Chunk
@@ -306,7 +287,6 @@ class LibraryService:
                 library.index.embeddings[doc_uid][chunk.uid] = chunk.embedding
             elif chunk.uid in library.index.embeddings.get(doc_uid, {}):
                 del library.index.embeddings[doc_uid][chunk.uid]
-        library.index.last_indexed = datetime.utcnow()
 
     def _update_index_for_chunk_delete(
         self, library: Library, doc_uid: UUID, chunk_uid: UUID
@@ -326,7 +306,6 @@ class LibraryService:
             and chunk_uid in library.index.embeddings[doc_uid]
         ):
             del library.index.embeddings[doc_uid][chunk_uid]
-        library.index.last_indexed = datetime.utcnow()
 
 
 # ============================================================================

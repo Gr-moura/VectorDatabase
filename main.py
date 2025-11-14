@@ -1,135 +1,213 @@
-from typing import List, Optional
-from enum import IntEnum
+from services import *
+from schemas import *
+from fastapi import FastAPI, status, HTTPException
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-
-api = FastAPI()
-
-
-class Priority(IntEnum):
-    LOW = 3
-    MEDIUM = 2
-    HIGH = 1
+app = FastAPI()
+service = LibraryService()
 
 
-class TodoBase(BaseModel):
-    # ... means required field
-    todo_name: str = Field(
-        ..., min_length=3, max_length=512, description="Name of the todo item"
-    )
-    todo_description: str = Field(..., description="Description of the todo item")
-    priority: Priority = Field(
-        default=Priority.LOW, description="Priority of the todo item"
-    )
+@app.get("/")
+def index():
+    return {"message": "Welcome to the Library Service API"}
 
 
-class TodoCreate(TodoBase):
-    pass
+# ============================================================================
+# Library Endpoints
+# ============================================================================
 
 
-# Like TodoBase but all fields are optional
-class TodoUpdate(BaseModel):
-    todo_name: Optional[str] = Field(
-        None, min_length=3, max_length=512, description="Name of the todo item"
-    )
-    todo_description: Optional[str] = Field(
-        None, description="Description of the todo item"
-    )
-    priority: Optional[Priority] = Field(None, description="Priority of the todo item")
+# Read all libraries
+@app.get(
+    "/libraries", status_code=status.HTTP_200_OK, response_model=List[LibraryResponse]
+)
+def list_libraries():
+    libraries = service.list_libraries()
+
+    if not libraries:
+        raise HTTPException(status_code=404, detail="No libraries found")
+
+    return {"libraries": libraries}
 
 
-# Since Todo inherits from TodoBase, it has all the same fields, plus todo_id
-class Todo(TodoBase):
-    todo_id: int = Field(..., description="ID of the todo item")
+# Read a specific library
+@app.get(
+    "/libraries/{library_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=LibraryResponse,
+)
+def get_library(library_id: UUID):
+    library = service.get_library(library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return {"library": library}
 
 
-# Trocamos pelos nossos novos modelos, tipos mais fortes do que apenas dict
-all_todos = [
-    Todo(
-        todo_id=1,
-        todo_name="Sports",
-        todo_description="Go to the gym",
-        priority=Priority.MEDIUM,
-    ),
-    Todo(
-        todo_id=2,
-        todo_name="Study",
-        todo_description="Learn FastAPI",
-        priority=Priority.HIGH,
-    ),
-    Todo(
-        todo_id=3,
-        todo_name="Grocery",
-        todo_description="Buy vegetables",
-        priority=Priority.LOW,
-    ),
-    Todo(
-        todo_id=4,
-        todo_name="Cleaning",
-        todo_description="Clean the house",
-        priority=Priority.MEDIUM,
-    ),
-    Todo(
-        todo_id=5,
-        todo_name="Cooking",
-        todo_description="Prepare dinner",
-        priority=Priority.LOW,
-    ),
-]
+# Create a new library
+@app.post(
+    "/libraries", status_code=status.HTTP_201_CREATED, response_model=LibraryResponse
+)
+def create_library(library_data: LibraryCreate):
+    library = service.create_library(library_data)
+    return {"library": library}
 
 
-# Como não é mais um dict, precisamos ajustar as funções para lidar com os novos modelos
-# Responde model significa que a resposta será do tipo Todo
-@api.get("/todos/{todo_id}", response_model=Todo)
-def get_todo(todo_id: int):
-    for todo in all_todos:
-        if todo.todo_id == todo_id:
-            return todo
-
-    raise HTTPException(status_code=404, detail="Todo not found")
-
-
-@api.get("/todos", response_model=List[Todo])
-def get_todos(first_n: int = None):
-    if first_n is None:
-        return all_todos
-    return all_todos[:first_n]
+# Update an existing library
+@app.put(
+    "/libraries/{library_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=LibraryResponse,
+)
+def update_library(library_id: UUID, library_data: LibraryUpdate):
+    library = service.update_library(library_id, library_data)
+    if not library:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return {"library": library}
 
 
-@api.post("/todos", response_model=Todo)
-def create_todo(todo: TodoCreate):
-    new_todo_id = max(todo.todo_id for todo in all_todos) + 1
-
-    new_todo = Todo(
-        todo_id=new_todo_id,
-        todo_name=todo.todo_name,
-        todo_description=todo.todo_description,
-        priority=todo.priority,
-    )
-
-    all_todos.append(new_todo)
-    return new_todo
+# Delete a library
+@app.delete("/libraries/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_library(library_id: UUID):
+    success = service.delete_library(library_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return {"detail": "Library deleted successfully"}
 
 
-@api.put("/todos/{todo_id}", response_model=Todo)
-def update_todo(todo_id: int, updated_todo: TodoUpdate):
-    for todo in all_todos:
-        if todo.todo_id == todo_id:
-            if updated_todo.todo_name is not None:
-                todo.todo_name = updated_todo.todo_name
-            if updated_todo.todo_description is not None:
-                todo.todo_description = updated_todo.todo_description
-            if updated_todo.priority is not None:
-                todo.priority = updated_todo.priority
-            return todo
-    raise HTTPException(status_code=404, detail="Todo not found")
+# ============================================================================
+# Document Endpoints
+# ============================================================================
 
 
-@api.delete("/todos/{todo_id}", response_model=Todo)
-def delete_todo(todo_id: int):
-    for index, todo in enumerate(all_todos):
-        if todo.todo_id == todo_id:
-            deleted_todo = all_todos.pop(index)
-            return deleted_todo
-    raise HTTPException(status_code=404, detail="Todo not found")
+# Read all documents in a library
+@app.get(
+    "/libraries/{library_id}/documents",
+    status_code=status.HTTP_200_OK,
+    response_model=List[DocumentResponse],
+)
+def list_documents(library_id: UUID):
+    documents = service.list_documents(library_id)
+    if not documents:
+        raise HTTPException(status_code=404, detail="No documents found")
+    return {"documents": documents}
+
+
+# Read a specific document
+@app.get(
+    "/libraries/{library_id}/documents/{document_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=DocumentResponse,
+)
+def get_document(library_id: UUID, document_id: UUID):
+    document_data = service.get_document(library_id, document_id)
+    if not document_data:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"document": document_data}
+
+
+# Create a new document in a library
+@app.post(
+    "/libraries/{library_id}/documents",
+    status_code=status.HTTP_201_CREATED,
+    response_model=DocumentResponse,
+)
+def create_document(library_id: UUID, document_data: DocumentCreate):
+    document = service.create_document(library_id, document_data)
+    if not document:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return {"document": document}
+
+
+# Update an existing document
+@app.put(
+    "/libraries/{library_id}/documents/{document_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=DocumentResponse,
+)
+def update_document(library_id: UUID, document_id: UUID, document_data: DocumentUpdate):
+    document = service.update_document(library_id, document_id, document_data)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"document": document}
+
+
+# Delete a document
+@app.delete(
+    "/libraries/{library_id}/documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_document(library_id: UUID, document_id: UUID):
+    success = service.delete_document(library_id, document_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"detail": "Document deleted successfully"}
+
+
+# ============================================================================
+# Chunk Endpoints
+# ============================================================================
+
+
+# Read all chunks in a document
+@app.get(
+    "/libraries/{library_id}/documents/{document_id}/chunks",
+    status_code=status.HTTP_200_OK,
+    response_model=List[ChunkResponse],
+)
+def list_chunks(library_id: UUID, document_id: UUID):
+    chunks = service.list_chunks(library_id, document_id)
+    if not chunks:
+        raise HTTPException(status_code=404, detail="No chunks found")
+    return {"chunks": chunks}
+
+
+# Read a specific chunk
+@app.get(
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ChunkResponse,
+)
+def get_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
+    chunk_data = service.get_chunk(library_id, document_id, chunk_id)
+    if not chunk_data:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return {"chunk": chunk_data}
+
+
+# Create a new chunk in a document
+@app.post(
+    "/libraries/{library_id}/documents/{document_id}/chunks",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ChunkResponse,
+)
+def create_chunk(library_id: UUID, document_id: UUID, chunk_data: ChunkCreate):
+    chunk = service.create_chunk(library_id, document_id, chunk_data)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"chunk": chunk}
+
+
+# Update an existing chunk
+@app.put(
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ChunkResponse,
+)
+def update_chunk(
+    library_id: UUID, document_id: UUID, chunk_id: UUID, chunk_data: ChunkUpdate
+):
+    chunk = service.update_chunk(library_id, document_id, chunk_id, chunk_data)
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return {"chunk": chunk}
+
+
+# Delete a chunk
+@app.delete(
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
+    success = service.delete_chunk(library_id, document_id, chunk_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return {"detail": "Chunk deleted successfully"}

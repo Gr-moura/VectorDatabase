@@ -5,11 +5,8 @@ from fastapi.testclient import TestClient
 from main import app, service
 from schemas import (
     LibraryCreate,
-    LibraryUpdate,
     DocumentCreate,
-    DocumentUpdate,
     ChunkCreate,
-    ChunkUpdate,
 )
 
 

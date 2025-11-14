@@ -1,3 +1,6 @@
+import numpy as np
+from uuid import UUID
+from typing import Dict, List, Tuple
 from uuid import UUID
 from typing import Dict, List
 
@@ -188,3 +191,67 @@ class LibraryService:
         """List all chunks in a document."""
         document = self.get_document(library_uid, doc_uid)
         return list(document.chunks.values())
+
+    # ========================================================================
+    # SEARCH OPERATIONS
+    # ========================================================================
+
+    def search_chunks(
+        self, library_uid: UUID, query_embedding: List[float], k: int
+    ) -> List[Dict]:
+        """
+        Performs a k-Nearest Neighbor search for chunks in a library.
+
+        Args:
+            library_uid: The ID of the library to search within.
+            query_embedding: The embedding vector for the query.
+            k: The number of top results to return.
+
+        Returns:
+            A list of dictionaries, each containing a chunk and its similarity score.
+        """
+        # 1. Get the library, which raises LibraryNotFound if it doesn't exist.
+        library = self.get_library(library_uid)
+
+        # 2. Collect all chunks that have an embedding from the library.
+        chunks_with_embeddings: List[Tuple[Chunk, np.ndarray]] = []
+        for document in library.documents.values():
+            for chunk in document.chunks.values():
+                if chunk.embedding:
+                    chunks_with_embeddings.append((chunk, np.array(chunk.embedding)))
+
+        if not chunks_with_embeddings:
+            return []  # No searchable chunks in this library
+
+        # 3. Prepare the query vector and the matrix of chunk embeddings.
+        query_vector = np.array(query_embedding)
+        chunk_matrix = np.array([item[1] for item in chunks_with_embeddings])
+
+        # Normalize vectors for cosine similarity calculation
+        # A.B / (|A|*|B|)
+        query_norm = np.linalg.norm(query_vector)
+        matrix_norms = np.linalg.norm(chunk_matrix, axis=1)
+
+        # Avoid division by zero for zero-vectors
+        if query_norm == 0 or np.any(matrix_norms == 0):
+            # Handle case where vectors might be all zeros
+            return []
+
+        # 4. Calculate cosine similarity between the query and all chunks.
+        # This is a highly efficient matrix operation.
+        similarities = np.dot(chunk_matrix, query_vector) / (matrix_norms * query_norm)
+
+        # 5. Find the indices of the top k most similar chunks.
+        # `np.argsort` returns indices that would sort the array.
+        # `[-k:]` gets the top k indices from the end of the sorted array (highest similarity).
+        # `[::-1]` reverses them to be in descending order of similarity.
+        top_k_indices = np.argsort(similarities)[-k:][::-1]
+
+        # 6. Format and return the results.
+        results = []
+        for i in top_k_indices:
+            result_chunk = chunks_with_embeddings[i][0]
+            similarity_score = similarities[i]
+            results.append({"chunk": result_chunk, "similarity": similarity_score})
+
+        return results

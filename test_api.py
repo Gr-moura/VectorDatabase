@@ -27,7 +27,7 @@ def reset_service():
 @pytest.fixture
 def sample_library():
     """Create a sample library for testing."""
-    library_data = LibraryCreate(name="Test Library", metadata={"type": "test"})
+    library_data = LibraryCreate(metadata={"name": "Test Library", "type": "test"})
     return service.create_library(library_data)
 
 
@@ -66,11 +66,11 @@ def test_create_library(client):
     """Test creating a new library."""
     response = client.post(
         "/libraries",
-        json={"name": "My Library", "metadata": {"description": "Test library"}},
+        json={"metadata": {"name": "My Library", "description": "Test library"}},
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "My Library"
+    assert data["metadata"]["name"] == "My Library"
     assert data["metadata"]["description"] == "Test library"
     assert "id" in data
     assert "documents" in data
@@ -78,17 +78,10 @@ def test_create_library(client):
 
 def test_create_library_minimal(client):
     """Test creating a library with minimal data."""
-    response = client.post("/libraries", json={"name": "Minimal Library"})
+    response = client.post("/libraries", json={"metadata": {"name": "Minimal Library"}})
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Minimal Library"
-    assert data["metadata"] == {}
-
-
-def test_create_library_invalid_name(client):
-    """Test creating a library with invalid name."""
-    response = client.post("/libraries", json={"name": ""})
-    assert response.status_code == 422
+    assert data["metadata"]["name"] == "Minimal Library"
 
 
 def test_get_library(client, sample_library):
@@ -97,7 +90,7 @@ def test_get_library(client, sample_library):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == str(sample_library.uid)
-    assert data["name"] == sample_library.name
+    assert data["metadata"]["name"] == sample_library.metadata["name"]
 
 
 def test_get_library_not_found(client):
@@ -117,15 +110,15 @@ def test_list_libraries_empty(client):
 
 def test_list_libraries(client):
     """Test listing multiple libraries."""
-    client.post("/libraries", json={"name": "Library 1"})
-    client.post("/libraries", json={"name": "Library 2"})
-    client.post("/libraries", json={"name": "Library 3"})
+    client.post("/libraries", json={"metadata": {"name": "Library 1"}})
+    client.post("/libraries", json={"metadata": {"name": "Library 2"}})
+    client.post("/libraries", json={"metadata": {"name": "Library 3"}})
 
     response = client.get("/libraries")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 3
-    names = [lib["name"] for lib in data]
+    names = [lib["metadata"]["name"] for lib in data]
     assert "Library 1" in names
     assert "Library 2" in names
     assert "Library 3" in names
@@ -135,29 +128,31 @@ def test_update_library(client, sample_library):
     """Test updating a library."""
     response = client.put(
         f"/libraries/{sample_library.uid}",
-        json={"name": "Updated Library", "metadata": {"updated": True}},
+        json={"metadata": {"name": "Updated Library", "updated": True}},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Updated Library"
+    assert data["metadata"]["name"] == "Updated Library"
     assert data["metadata"]["updated"] is True
 
 
 def test_update_library_partial(client, sample_library):
     """Test partial update of a library."""
     response = client.put(
-        f"/libraries/{sample_library.uid}", json={"name": "Partially Updated"}
+        f"/libraries/{sample_library.uid}",
+        json={"metadata": {"name": "Partially Updated"}},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Partially Updated"
-    assert data["metadata"] == sample_library.metadata
+    assert data["metadata"]["name"] == "Partially Updated"
 
 
 def test_update_library_not_found(client):
     """Test updating a non-existent library."""
     fake_id = uuid4()
-    response = client.put(f"/libraries/{fake_id}", json={"name": "Should Fail"})
+    response = client.put(
+        f"/libraries/{fake_id}", json={"metadata": {"name": "Should Fail"}}
+    )
     assert response.status_code == 404
 
 

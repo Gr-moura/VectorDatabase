@@ -15,6 +15,8 @@ from schemas import (
     ChunkResponse,
     ChunkCreate,
     ChunkUpdate,
+    SearchQuery,
+    SearchResult,
 )
 from exceptions import LibraryNotFound, DocumentNotFound, ChunkNotFound
 
@@ -101,6 +103,23 @@ def update_library(library_id: UUID, library_data: LibraryUpdate):
 def delete_library(library_id: UUID):
     service.delete_library(library_id)
     return
+
+
+@app.post(
+    "/libraries/{library_id}/search",
+    status_code=status.HTTP_200_OK,
+    response_model=List[SearchResult],
+)
+def search_in_library(library_id: UUID, query: SearchQuery):
+    """
+    Performs a k-NN vector search over all chunks in a specific library.
+    """
+    results = service.search_chunks(
+        library_uid=library_id,
+        query_embedding=query.query_embedding,
+        k=query.k,
+    )
+    return results
 
 
 # ============================================================================

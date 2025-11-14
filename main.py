@@ -1,3 +1,5 @@
+from typing import List
+from uuid import UUID
 from services import *
 from schemas import *
 from fastapi import FastAPI, status, HTTPException
@@ -22,11 +24,9 @@ def index():
 )
 def list_libraries():
     libraries = service.list_libraries()
-
     if not libraries:
         raise HTTPException(status_code=404, detail="No libraries found")
-
-    return {"libraries": libraries}
+    return libraries
 
 
 # Read a specific library
@@ -39,7 +39,7 @@ def get_library(library_id: UUID):
     library = service.get_library(library_id)
     if not library:
         raise HTTPException(status_code=404, detail="Library not found")
-    return {"library": library}
+    return library
 
 
 # Create a new library
@@ -48,7 +48,7 @@ def get_library(library_id: UUID):
 )
 def create_library(library_data: LibraryCreate):
     library = service.create_library(library_data)
-    return {"library": library}
+    return library
 
 
 # Update an existing library
@@ -61,7 +61,7 @@ def update_library(library_id: UUID, library_data: LibraryUpdate):
     library = service.update_library(library_id, library_data)
     if not library:
         raise HTTPException(status_code=404, detail="Library not found")
-    return {"library": library}
+    return library
 
 
 # Delete a library
@@ -70,7 +70,7 @@ def delete_library(library_id: UUID):
     success = service.delete_library(library_id)
     if not success:
         raise HTTPException(status_code=404, detail="Library not found")
-    return {"detail": "Library deleted successfully"}
+    return
 
 
 # ============================================================================
@@ -88,7 +88,7 @@ def list_documents(library_id: UUID):
     documents = service.list_documents(library_id)
     if not documents:
         raise HTTPException(status_code=404, detail="No documents found")
-    return {"documents": documents}
+    return [{**doc, "library_uid": library_id} for doc in documents]
 
 
 # Read a specific document
@@ -101,7 +101,7 @@ def get_document(library_id: UUID, document_id: UUID):
     document_data = service.get_document(library_id, document_id)
     if not document_data:
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"document": document_data}
+    return {**document_data, "library_uid": library_id}
 
 
 # Create a new document in a library
@@ -114,7 +114,7 @@ def create_document(library_id: UUID, document_data: DocumentCreate):
     document = service.create_document(library_id, document_data)
     if not document:
         raise HTTPException(status_code=404, detail="Library not found")
-    return {"document": document}
+    return {**document, "library_uid": library_id}
 
 
 # Update an existing document
@@ -127,7 +127,7 @@ def update_document(library_id: UUID, document_id: UUID, document_data: Document
     document = service.update_document(library_id, document_id, document_data)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"document": document}
+    return {**document, "library_uid": library_id}
 
 
 # Delete a document
@@ -139,7 +139,7 @@ def delete_document(library_id: UUID, document_id: UUID):
     success = service.delete_document(library_id, document_id)
     if not success:
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"detail": "Document deleted successfully"}
+    return
 
 
 # ============================================================================
@@ -157,7 +157,10 @@ def list_chunks(library_id: UUID, document_id: UUID):
     chunks = service.list_chunks(library_id, document_id)
     if not chunks:
         raise HTTPException(status_code=404, detail="No chunks found")
-    return {"chunks": chunks}
+    return [
+        {**chunk, "library_uid": library_id, "document_uid": document_id}
+        for chunk in chunks
+    ]
 
 
 # Read a specific chunk
@@ -170,7 +173,7 @@ def get_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
     chunk_data = service.get_chunk(library_id, document_id, chunk_id)
     if not chunk_data:
         raise HTTPException(status_code=404, detail="Chunk not found")
-    return {"chunk": chunk_data}
+    return {**chunk_data, "library_uid": library_id, "document_uid": document_id}
 
 
 # Create a new chunk in a document
@@ -183,7 +186,7 @@ def create_chunk(library_id: UUID, document_id: UUID, chunk_data: ChunkCreate):
     chunk = service.create_chunk(library_id, document_id, chunk_data)
     if not chunk:
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"chunk": chunk}
+    return {**chunk, "library_uid": library_id, "document_uid": document_id}
 
 
 # Update an existing chunk
@@ -198,7 +201,7 @@ def update_chunk(
     chunk = service.update_chunk(library_id, document_id, chunk_id, chunk_data)
     if not chunk:
         raise HTTPException(status_code=404, detail="Chunk not found")
-    return {"chunk": chunk}
+    return {**chunk, "library_uid": library_id, "document_uid": document_id}
 
 
 # Delete a chunk
@@ -210,4 +213,4 @@ def delete_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
     success = service.delete_chunk(library_id, document_id, chunk_id)
     if not success:
         raise HTTPException(status_code=404, detail="Chunk not found")
-    return {"detail": "Chunk deleted successfully"}
+    return

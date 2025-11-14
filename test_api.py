@@ -4,16 +4,10 @@ from typing import Any, Dict, List
 import pytest
 from fastapi.testclient import TestClient
 
-# Adjust this import if your FastAPI file has a different name (e.g., api.py)
 import main
 
 
 class DummyService:
-    """
-    A small, configurable fake service to replace the real `service` used by the FastAPI app.
-    Each attribute corresponds to a method used by the API and should be set to the desired return value.
-    If a method needs to be callable (e.g. to assert it was called), replace the attribute with a callable.
-    """
 
     def __init__(self):
         # library-related
@@ -88,10 +82,6 @@ class DummyService:
 
 @pytest.fixture(autouse=True)
 def client_and_service(monkeypatch) -> TestClient:
-    """
-    Fixture that creates a TestClient and monkeypatches main.service to a fresh DummyService for each test.
-    Tests can mutate `main.service` to control behavior.
-    """
     dummy = DummyService()
     monkeypatch.setattr(main, "service", dummy, raising=False)
     client = TestClient(main.app)
@@ -116,13 +106,13 @@ def test_list_libraries_not_found(client_and_service):
 
 
 def test_list_libraries_success(client_and_service):
-    lib = {"id": str(uuid.uuid4()), "name": "lib1"}
+    lib = {"id": str(uuid.uuid4()), "name": "lib1", "metadata": {}, "documents": {}}
     main.service.list_libraries_return = [lib]
     resp = client_and_service.get("/libraries")
     assert resp.status_code == 200
     body = resp.json()
-    assert "libraries" in body
-    assert body["libraries"][0]["id"] == lib["id"]
+    assert isinstance(body, list)
+    assert body[0]["id"] == lib["id"]
 
 
 def test_get_library_not_found(client_and_service):
@@ -134,21 +124,26 @@ def test_get_library_not_found(client_and_service):
 
 
 def test_get_library_success(client_and_service):
-    lib = {"id": str(uuid.uuid4()), "name": "libX"}
+    lib = {"id": str(uuid.uuid4()), "name": "libX", "metadata": {}, "documents": {}}
     main.service.get_library_return = lib
     resp = client_and_service.get(f"/libraries/{lib['id']}")
     assert resp.status_code == 200
-    assert resp.json()["library"]["id"] == lib["id"]
+    assert resp.json()["id"] == lib["id"]
 
 
 def test_create_library(client_and_service):
     payload = {"name": "new lib"}
-    created = {"id": str(uuid.uuid4()), "name": payload["name"]}
+    created = {
+        "id": str(uuid.uuid4()),
+        "name": payload["name"],
+        "metadata": {},
+        "documents": {},
+    }
     main.service.create_library_return = created
     resp = client_and_service.post("/libraries", json=payload)
     assert resp.status_code == 201
-    assert resp.json()["library"]["name"] == payload["name"]
-    assert resp.json()["library"]["id"] == created["id"]
+    assert resp.json()["name"] == payload["name"]
+    assert resp.json()["id"] == created["id"]
 
 
 def test_update_library_not_found(client_and_service):
@@ -161,13 +156,13 @@ def test_update_library_not_found(client_and_service):
 
 def test_update_library_success(client_and_service):
     lib_id = str(uuid.uuid4())
-    updated = {"id": lib_id, "name": "updated name"}
+    updated = {"id": lib_id, "name": "updated name", "metadata": {}, "documents": {}}
     main.service.update_library_return = updated
     resp = client_and_service.put(
         f"/libraries/{lib_id}", json={"name": updated["name"]}
     )
     assert resp.status_code == 200
-    assert resp.json()["library"]["name"] == "updated name"
+    assert resp.json()["name"] == "updated name"
 
 
 def test_delete_library_not_found(client_and_service):
@@ -182,11 +177,8 @@ def test_delete_library_success(client_and_service):
     main.service.delete_library_return = True
     lib_id = str(uuid.uuid4())
     resp = client_and_service.delete(f"/libraries/{lib_id}")
-    # The app sets status_code=status.HTTP_204_NO_CONTENT; check status code
     assert resp.status_code == 204
-    # if body included, verify message; otherwise allow empty body
-    if resp.content:
-        assert resp.json()["detail"] == "Library deleted successfully"
+    assert not resp.content
 
 
 # --------------------
@@ -201,12 +193,15 @@ def test_list_documents_not_found(client_and_service):
 
 
 def test_list_documents_success(client_and_service):
-    doc = {"id": str(uuid.uuid4()), "title": "doc1"}
+    doc = {"id": str(uuid.uuid4()), "metadata": {}, "chunks": {}}
     main.service.list_documents_return = [doc]
     lib_id = str(uuid.uuid4())
     resp = client_and_service.get(f"/libraries/{lib_id}/documents")
     assert resp.status_code == 200
-    assert resp.json()["documents"][0]["id"] == doc["id"]
+    body = resp.json()
+    assert isinstance(body, list)
+    assert body[0]["id"] == doc["id"]
+    assert body[0]["library_uid"] == lib_id
 
 
 def test_get_document_not_found(client_and_service):
@@ -219,18 +214,19 @@ def test_get_document_not_found(client_and_service):
 
 
 def test_get_document_success(client_and_service):
-    doc = {"id": str(uuid.uuid4()), "title": "docX"}
+    doc = {"id": str(uuid.uuid4()), "metadata": {}, "chunks": {}}
     main.service.get_document_return = doc
     lib_id = str(uuid.uuid4())
     resp = client_and_service.get(f"/libraries/{lib_id}/documents/{doc['id']}")
     assert resp.status_code == 200
-    assert resp.json()["document"]["id"] == doc["id"]
+    assert resp.json()["id"] == doc["id"]
+    assert resp.json()["library_uid"] == lib_id
 
 
 def test_create_document_library_not_found(client_and_service):
     main.service.create_document_return = None
     lib_id = str(uuid.uuid4())
-    payload = {"title": "a doc"}
+    payload = {"metadata": {}}
     resp = client_and_service.post(f"/libraries/{lib_id}/documents", json=payload)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Library not found"
@@ -238,13 +234,14 @@ def test_create_document_library_not_found(client_and_service):
 
 def test_create_document_success(client_and_service):
     lib_id = str(uuid.uuid4())
-    created_doc = {"id": str(uuid.uuid4()), "title": "created"}
+    created_doc = {"id": str(uuid.uuid4()), "metadata": {}, "chunks": {}}
     main.service.create_document_return = created_doc
     resp = client_and_service.post(
-        f"/libraries/{lib_id}/documents", json={"title": created_doc["title"]}
+        f"/libraries/{lib_id}/documents", json={"metadata": {}}
     )
     assert resp.status_code == 201
-    assert resp.json()["document"]["id"] == created_doc["id"]
+    assert resp.json()["id"] == created_doc["id"]
+    assert resp.json()["library_uid"] == lib_id
 
 
 def test_update_document_not_found(client_and_service):
@@ -252,7 +249,7 @@ def test_update_document_not_found(client_and_service):
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
     resp = client_and_service.put(
-        f"/libraries/{lib_id}/documents/{doc_id}", json={"title": "x"}
+        f"/libraries/{lib_id}/documents/{doc_id}", json={"metadata": {"key": "val"}}
     )
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Document not found"
@@ -261,13 +258,14 @@ def test_update_document_not_found(client_and_service):
 def test_update_document_success(client_and_service):
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
-    updated = {"id": doc_id, "title": "updated"}
+    updated = {"id": doc_id, "metadata": {"status": "updated"}, "chunks": {}}
     main.service.update_document_return = updated
     resp = client_and_service.put(
-        f"/libraries/{lib_id}/documents/{doc_id}", json={"title": updated["title"]}
+        f"/libraries/{lib_id}/documents/{doc_id}",
+        json={"metadata": updated["metadata"]},
     )
     assert resp.status_code == 200
-    assert resp.json()["document"]["title"] == "updated"
+    assert resp.json()["metadata"]["status"] == "updated"
 
 
 def test_delete_document_not_found(client_and_service):
@@ -285,8 +283,7 @@ def test_delete_document_success(client_and_service):
     doc_id = str(uuid.uuid4())
     resp = client_and_service.delete(f"/libraries/{lib_id}/documents/{doc_id}")
     assert resp.status_code == 204
-    if resp.content:
-        assert resp.json()["detail"] == "Document deleted successfully"
+    assert not resp.content
 
 
 # --------------------
@@ -302,13 +299,17 @@ def test_list_chunks_not_found(client_and_service):
 
 
 def test_list_chunks_success(client_and_service):
-    chunk = {"id": str(uuid.uuid4()), "text": "c"}
+    chunk = {"id": str(uuid.uuid4()), "text": "c", "metadata": {}}
     main.service.list_chunks_return = [chunk]
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
     resp = client_and_service.get(f"/libraries/{lib_id}/documents/{doc_id}/chunks")
     assert resp.status_code == 200
-    assert resp.json()["chunks"][0]["id"] == chunk["id"]
+    body = resp.json()
+    assert isinstance(body, list)
+    assert body[0]["id"] == chunk["id"]
+    assert body[0]["library_uid"] == lib_id
+    assert body[0]["document_uid"] == doc_id
 
 
 def test_get_chunk_not_found(client_and_service):
@@ -324,7 +325,7 @@ def test_get_chunk_not_found(client_and_service):
 
 
 def test_get_chunk_success(client_and_service):
-    chunk = {"id": str(uuid.uuid4()), "text": "chunk"}
+    chunk = {"id": str(uuid.uuid4()), "text": "chunk", "metadata": {}}
     main.service.get_chunk_return = chunk
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
@@ -332,7 +333,9 @@ def test_get_chunk_success(client_and_service):
         f"/libraries/{lib_id}/documents/{doc_id}/chunks/{chunk['id']}"
     )
     assert resp.status_code == 200
-    assert resp.json()["chunk"]["id"] == chunk["id"]
+    assert resp.json()["id"] == chunk["id"]
+    assert resp.json()["library_uid"] == lib_id
+    assert resp.json()["document_uid"] == doc_id
 
 
 def test_create_chunk_document_not_found(client_and_service):
@@ -349,13 +352,15 @@ def test_create_chunk_document_not_found(client_and_service):
 def test_create_chunk_success(client_and_service):
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
-    created = {"id": str(uuid.uuid4()), "text": "created"}
+    created = {"id": str(uuid.uuid4()), "text": "created", "metadata": {}}
     main.service.create_chunk_return = created
     resp = client_and_service.post(
         f"/libraries/{lib_id}/documents/{doc_id}/chunks", json={"text": created["text"]}
     )
     assert resp.status_code == 201
-    assert resp.json()["chunk"]["id"] == created["id"]
+    assert resp.json()["id"] == created["id"]
+    assert resp.json()["library_uid"] == lib_id
+    assert resp.json()["document_uid"] == doc_id
 
 
 def test_update_chunk_not_found(client_and_service):
@@ -374,14 +379,14 @@ def test_update_chunk_success(client_and_service):
     lib_id = str(uuid.uuid4())
     doc_id = str(uuid.uuid4())
     chunk_id = str(uuid.uuid4())
-    updated = {"id": chunk_id, "text": "updated"}
+    updated = {"id": chunk_id, "text": "updated", "metadata": {}}
     main.service.update_chunk_return = updated
     resp = client_and_service.put(
         f"/libraries/{lib_id}/documents/{doc_id}/chunks/{chunk_id}",
         json={"text": "updated"},
     )
     assert resp.status_code == 200
-    assert resp.json()["chunk"]["text"] == "updated"
+    assert resp.json()["text"] == "updated"
 
 
 def test_delete_chunk_not_found(client_and_service):
@@ -405,5 +410,4 @@ def test_delete_chunk_success(client_and_service):
         f"/libraries/{lib_id}/documents/{doc_id}/chunks/{chunk_id}"
     )
     assert resp.status_code == 204
-    if resp.content:
-        assert resp.json()["detail"] == "Chunk deleted successfully"
+    assert not resp.content

@@ -1,123 +1,85 @@
-# src/api/endpoints/chunks.py
-
-"""
-API endpoints for CRUD operations on Chunks within a Library.
-"""
-
-import uuid
 from typing import List
-
-from fastapi import APIRouter, Depends, HTTPException, status, Path
-
+from uuid import UUID
+from fastapi import APIRouter, Depends, status
 from src.api import schemas
+from src.services.chunk_service import ChunkService
 from src.api.dependencies import get_chunk_service
 
-# from src.core.exceptions import LibraryNotFoundException, ChunkNotFoundException, DimensionMismatchException
-# from src.services.chunk_service import ChunkService
-
-# --- Mock/Placeholder Imports ---
-MockService = object
-LibraryNotFoundException = ValueError
-ChunkNotFoundException = ValueError
-DimensionMismatchException = ValueError
-# ---
-
-router = APIRouter(
-    prefix="/libraries/{library_id}/chunks",
-    tags=["Chunks"],
-)
+router = APIRouter()
 
 
 @router.post(
-    "/",
-    response_model=schemas.Chunk,
+    "/libraries/{library_id}/documents/{document_id}/chunks",
     status_code=status.HTTP_201_CREATED,
-    summary="Add a chunk to a library",
+    response_model=schemas.ChunkResponse,
 )
-def add_chunk_to_library(
-    library_id: uuid.UUID,
-    chunk_in: schemas.ChunkCreate,
-    chunk_service: MockService = Depends(get_chunk_service),
-) -> schemas.Chunk:
-    """
-    Add a new chunk with its vector embedding to a specific library.
-    The chunk will be added to the library's index.
-    """
-    try:
-        # In a real app:
-        # new_chunk = chunk_service.add_chunk(library_id=library_id, chunk_create=chunk_in)
-        # return new_chunk
-        return schemas.Chunk(id=uuid.uuid4(), **chunk_in.model_dump())
-    except LibraryNotFoundException:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Library with ID '{library_id}' not found.",
-        )
-    except DimensionMismatchException as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+def create_chunk(
+    library_id: UUID,
+    document_id: UUID,
+    chunk_data: schemas.ChunkCreate,
+    service: ChunkService = Depends(get_chunk_service),
+):
+    chunk = service.create_chunk(library_id, document_id, chunk_data)
+    return schemas.ChunkResponse.from_model(chunk, library_id, document_id)
 
 
 @router.get(
-    "/", response_model=list[schemas.Chunk], summary="List all chunks in a library"
+    "/libraries/{library_id}/documents/{document_id}/chunks",
+    status_code=status.HTTP_200_OK,
+    response_model=List[schemas.ChunkResponse],
 )
-def get_all_chunks_in_library(
-    library_id: uuid.UUID,
-    chunk_service: MockService = Depends(get_chunk_service),
-) -> list[schemas.Chunk]:
-    """Retrieve all chunks stored within a specific library."""
-    try:
-        # In a real app:
-        # return chunk_service.get_all_chunks(library_id)
-        return []
-    except LibraryNotFoundException:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Library with ID '{library_id}' not found.",
-        )
+def list_chunks(
+    library_id: UUID,
+    document_id: UUID,
+    service: ChunkService = Depends(get_chunk_service),
+):
+    chunks = service.list_chunks(library_id, document_id)
+    return [
+        schemas.ChunkResponse.from_model(chunk, library_id, document_id)
+        for chunk in chunks
+    ]
 
 
 @router.get(
-    "/{chunk_id}", response_model=schemas.Chunk, summary="Get a specific chunk by ID"
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=schemas.ChunkResponse,
 )
 def get_chunk(
-    library_id: uuid.UUID,
-    chunk_id: uuid.UUID,
-    chunk_service: MockService = Depends(get_chunk_service),
-) -> schemas.Chunk:
-    """Retrieve a single chunk from a library by its ID."""
-    try:
-        # In a real app:
-        # chunk = chunk_service.get_chunk_by_id(library_id=library_id, chunk_id=chunk_id)
-        # return chunk
-        return schemas.Chunk(
-            id=chunk_id,
-            document_id=uuid.uuid4(),
-            text="mock text",
-            embedding=[0.1] * 128,
-        )
-    except (LibraryNotFoundException, ChunkNotFoundException):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Chunk with ID '{chunk_id}' not found in library '{library_id}'.",
-        )
+    library_id: UUID,
+    document_id: UUID,
+    chunk_id: UUID,
+    service: ChunkService = Depends(get_chunk_service),
+):
+    chunk = service.get_chunk(library_id, document_id, chunk_id)
+    return schemas.ChunkResponse.from_model(chunk, library_id, document_id)
+
+
+@router.put(
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=schemas.ChunkResponse,
+)
+def update_chunk(
+    library_id: UUID,
+    document_id: UUID,
+    chunk_id: UUID,
+    chunk_data: schemas.ChunkUpdate,
+    service: ChunkService = Depends(get_chunk_service),
+):
+    chunk = service.update_chunk(library_id, document_id, chunk_id, chunk_data)
+    return schemas.ChunkResponse.from_model(chunk, library_id, document_id)
 
 
 @router.delete(
-    "/{chunk_id}",
+    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a chunk from a library",
 )
 def delete_chunk(
-    library_id: uuid.UUID,
-    chunk_id: uuid.UUID,
-    chunk_service: MockService = Depends(get_chunk_service),
-) -> None:
-    """Permanently delete a chunk from a library and its index."""
-    try:
-        # In a real app:
-        # chunk_service.delete_chunk(library_id=library_id, chunk_id=chunk_id)
-        pass
-    except (LibraryNotFoundException, ChunkNotFoundException):
-        # As with library deletion, deleting a non-existent chunk is idempotent.
-        pass
-    return None
+    library_id: UUID,
+    document_id: UUID,
+    chunk_id: UUID,
+    service: ChunkService = Depends(get_chunk_service),
+):
+    service.delete_chunk(library_id, document_id, chunk_id)
+    return

@@ -1,27 +1,18 @@
-from typing import List
-from uuid import UUID
+# vector_db_project/main.py
 
-from fastapi import FastAPI, status, Request
+import uvicorn
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from services import LibraryService
-from schemas import (
-    LibraryResponse,
-    LibraryCreate,
-    LibraryUpdate,
-    DocumentResponse,
-    DocumentCreate,
-    DocumentUpdate,
-    ChunkResponse,
-    ChunkCreate,
-    ChunkUpdate,
-    SearchQuery,
-    SearchResult,
-)
-from exceptions import LibraryNotFound, DocumentNotFound, ChunkNotFound
+from src.api.endpoints import libraries, documents, chunks, search
+from src.core.exceptions import LibraryNotFound, DocumentNotFound, ChunkNotFound
 
-app = FastAPI()
-service = LibraryService()
+# Create the main FastAPI application
+app = FastAPI(
+    title="Vector DB Project",
+    description="A simple vector database API using FastAPI",
+    version="1.0.0",
+)
 
 # ============================================================================
 # EXCEPTION HANDLERS
@@ -53,195 +44,21 @@ async def chunk_not_found_exception_handler(request: Request, exc: ChunkNotFound
 
 
 # ============================================================================
-# API Endpoints
+# API Routers
 # ============================================================================
 
-
-@app.get("/")
-def index():
-    return {"message": "Welcome to the Library Service API"}
-
-
-# ============================================================================
-# Library Endpoints
-# ============================================================================
+# Include routers from the API layer. This keeps the main file organized.
+app.include_router(libraries.router, prefix="/libraries", tags=["Libraries"])
+app.include_router(documents.router, tags=["Documents"])
+app.include_router(chunks.router, tags=["Chunks"])
+app.include_router(search.router, tags=["Search"])
 
 
-@app.get(
-    "/libraries", status_code=status.HTTP_200_OK, response_model=List[LibraryResponse]
-)
-def list_libraries():
-    return service.list_libraries()
+@app.get("/", tags=["Root"])
+def read_root():
+    return {"message": "Welcome to the Vector DB API"}
 
 
-@app.get(
-    "/libraries/{library_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=LibraryResponse,
-)
-def get_library(library_id: UUID):
-    return service.get_library(library_id)
-
-
-@app.post(
-    "/libraries", status_code=status.HTTP_201_CREATED, response_model=LibraryResponse
-)
-def create_library(library_data: LibraryCreate):
-    return service.create_library(library_data)
-
-
-@app.put(
-    "/libraries/{library_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=LibraryResponse,
-)
-def update_library(library_id: UUID, library_data: LibraryUpdate):
-    return service.update_library(library_id, library_data)
-
-
-@app.delete("/libraries/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_library(library_id: UUID):
-    service.delete_library(library_id)
-    return
-
-
-@app.post(
-    "/libraries/{library_id}/search",
-    status_code=status.HTTP_200_OK,
-    response_model=List[SearchResult],
-)
-def search_in_library(library_id: UUID, query: SearchQuery):
-    """
-    Performs a k-NN vector search over all chunks in a specific library.
-    """
-    results = service.search_chunks(
-        library_uid=library_id,
-        query_embedding=query.query_embedding,
-        k=query.k,
-    )
-    return results
-
-
-# ============================================================================
-# Document Endpoints
-# ============================================================================
-
-
-@app.get(
-    "/libraries/{library_id}/documents",
-    status_code=status.HTTP_200_OK,
-    response_model=List[DocumentResponse],
-)
-def list_documents(library_id: UUID):
-    documents = service.list_documents(library_id)
-    return [{**doc.model_dump(), "library_uid": library_id} for doc in documents]
-
-
-@app.get(
-    "/libraries/{library_id}/documents/{document_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=DocumentResponse,
-)
-def get_document(library_id: UUID, document_id: UUID):
-    document = service.get_document(library_id, document_id)
-    return {**document.model_dump(), "library_uid": library_id}
-
-
-@app.post(
-    "/libraries/{library_id}/documents",
-    status_code=status.HTTP_201_CREATED,
-    response_model=DocumentResponse,
-)
-def create_document(library_id: UUID, document_data: DocumentCreate):
-    document = service.create_document(library_id, document_data)
-    return {**document.model_dump(), "library_uid": library_id}
-
-
-@app.put(
-    "/libraries/{library_id}/documents/{document_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=DocumentResponse,
-)
-def update_document(library_id: UUID, document_id: UUID, document_data: DocumentUpdate):
-    document = service.update_document(library_id, document_id, document_data)
-    return {**document.model_dump(), "library_uid": library_id}
-
-
-@app.delete(
-    "/libraries/{library_id}/documents/{document_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_document(library_id: UUID, document_id: UUID):
-    service.delete_document(library_id, document_id)
-    return
-
-
-# ============================================================================
-# Chunk Endpoints
-# ============================================================================
-
-
-@app.get(
-    "/libraries/{library_id}/documents/{document_id}/chunks",
-    status_code=status.HTTP_200_OK,
-    response_model=List[ChunkResponse],
-)
-def list_chunks(library_id: UUID, document_id: UUID):
-    chunks = service.list_chunks(library_id, document_id)
-    return [
-        {**chunk.model_dump(), "library_uid": library_id, "document_uid": document_id}
-        for chunk in chunks
-    ]
-
-
-@app.get(
-    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=ChunkResponse,
-)
-def get_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
-    chunk = service.get_chunk(library_id, document_id, chunk_id)
-    return {
-        **chunk.model_dump(),
-        "library_uid": library_id,
-        "document_uid": document_id,
-    }
-
-
-@app.post(
-    "/libraries/{library_id}/documents/{document_id}/chunks",
-    status_code=status.HTTP_201_CREATED,
-    response_model=ChunkResponse,
-)
-def create_chunk(library_id: UUID, document_id: UUID, chunk_data: ChunkCreate):
-    chunk = service.create_chunk(library_id, document_id, chunk_data)
-    return {
-        **chunk.model_dump(),
-        "library_uid": library_id,
-        "document_uid": document_id,
-    }
-
-
-@app.put(
-    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
-    status_code=status.HTTP_200_OK,
-    response_model=ChunkResponse,
-)
-def update_chunk(
-    library_id: UUID, document_id: UUID, chunk_id: UUID, chunk_data: ChunkUpdate
-):
-    chunk = service.update_chunk(library_id, document_id, chunk_id, chunk_data)
-    return {
-        **chunk.model_dump(),
-        "library_uid": library_id,
-        "document_uid": document_id,
-    }
-
-
-@app.delete(
-    "/libraries/{library_id}/documents/{document_id}/chunks/{chunk_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_chunk(library_id: UUID, document_id: UUID, chunk_id: UUID):
-    service.delete_chunk(library_id, document_id, chunk_id)
-    return
+# Optional: Add a main block to run the app with uvicorn for easy development
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

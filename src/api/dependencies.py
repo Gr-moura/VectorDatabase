@@ -1,82 +1,32 @@
-# src/api/dependencies.py
+# vector_db_project/src/api/dependencies.py
 
-"""
-FastAPI dependency injection setup.
+from src.infrastructure.repositories.in_memory_repo import InMemoryLibraryRepository
+from src.services.library_service import LibraryService
+from src.services.document_service import DocumentService
+from src.services.chunk_service import ChunkService
+from src.services.search_service import SearchService
+from src.core.indexing.flat_index import FlatIndex
 
-This module is responsible for instantiating and wiring up the application's
-dependencies, such as services and repositories. It allows the API layer
-to remain decoupled from the business logic and data access implementations.
-"""
+# Create a single repository instance to be shared across the application lifecycle.
+# This simulates a database connection pool.
+library_repository = InMemoryLibraryRepository()
 
-# Note: The following imports are placeholders for the actual implementations
-# that would exist in the other layers of the application.
-
-# from src.infrastructure.repositories.in_memory_repo import (
-#     in_memory_library_repository,
-#     in_memory_chunk_repository,
-# )
-# from src.services.library_service import LibraryService
-# from src.services.chunk_service import ChunkService
-# from src.services.search_service import SearchService
-# from src.core.indexing.factory import IndexFactory
-
-# --- Mock Implementations for demonstration ---
-# In a real application, these would be the actual imported classes.
+# Create a single index instance for the same reason.
+# In a real app, you might have a factory that creates indexes per library.
+vector_index = FlatIndex()
 
 
-class MockRepo:
-    """A mock repository to stand in for a real implementation."""
-
-    def __init__(self, name: str):
-        self._name = name
-        print(f"Instantiated MockRepo: {self._name}")
+def get_library_service() -> LibraryService:
+    return LibraryService(repository=library_repository)
 
 
-class MockService:
-    """A mock service to stand in for a real implementation."""
-
-    def __init__(self, *args, **kwargs):
-        pass
+def get_document_service() -> DocumentService:
+    return DocumentService(repository=library_repository)
 
 
-# Instantiate singleton repositories
-# This pattern ensures all services use the same in-memory data store.
-library_repository = MockRepo("LibraryRepository")
-chunk_repository = MockRepo("ChunkRepository")
-
-# --- Dependency Provider Functions ---
+def get_chunk_service() -> ChunkService:
+    return ChunkService(repository=library_repository)
 
 
-def get_library_service() -> MockService:
-    """
-    Dependency provider for the LibraryService.
-
-    Initializes the service with its required repository. FastAPI will cache
-    the result for the scope of a single request.
-    """
-    # In a real app:
-    # return LibraryService(repository=library_repository)
-    return MockService(repository=library_repository)
-
-
-def get_chunk_service() -> MockService:
-    """Dependency provider for the ChunkService."""
-    # In a real app:
-    # return ChunkService(
-    #     chunk_repository=chunk_repository,
-    #     library_repository=library_repository
-    # )
-    return MockService(
-        chunk_repository=chunk_repository, library_repository=library_repository
-    )
-
-
-def get_search_service() -> MockService:
-    """Dependency provider for the SearchService."""
-    # In a real app:
-    # index_factory = IndexFactory()
-    # return SearchService(
-    #     library_repository=library_repository,
-    #     index_factory=index_factory
-    # )
-    return MockService(library_repository=library_repository)
+def get_search_service() -> SearchService:
+    return SearchService(repository=library_repository, index=vector_index)

@@ -15,6 +15,7 @@ vector_db_project/
 │   │   ├── endpoints/
 │   │   │   ├── __init__.py
 │   │   │   ├── libraries.py    <-- Endpoints CRUD para /libraries
+│   │   │   ├── documents.py    <-- Endpoints CRUD para /libraries/{id}/documents
 │   │   │   ├── chunks.py       <-- Endpoints CRUD para /libraries/{id}/chunks
 │   │   │   └── search.py       <-- Endpoint para /libraries/{id}/search (k-NN)
 │   │   └── schemas.py          <-- Modelos Pydantic (Request/Response) para a camada API
@@ -32,6 +33,7 @@ vector_db_project/
 │   ├── services/             <-- CAMADA DE SERVIÇO: "Separate API endpoints from business logic using services"
 │   │   ├── __init__.py
 │   │   ├── library_service.py  <-- Lógica de negócio para "CRUD operations on libraries"
+│   │   ├── document_service.py <-- Lógica de negócio para "CRUD operations on documents"
 │   │   ├── chunk_service.py    <-- Lógica de negócio para "CRUD operations on ... chunks"
 │   │   └── search_service.py   <-- Lógica para "Index the contents" e "Do k-Nearest Neighbor"
 │   │
@@ -41,10 +43,6 @@ vector_db_project/
 │   │   │   ├── __init__.py
 │   │   │   ├── base_repo.py    <-- Interfaces dos Repositórios (ex: ILibraryRepository)
 │   │   │   └── in_memory_repo.py <-- Implementação do repositório (ex: um dict global)
-│   │   │
-│   │   ├── persistence/        <-- Extra Point: "Persistence to Disk"
-│   │   │   ├── __init__.py
-│   │   │   └── file_storage.py <-- Lógica para salvar/carregar o `in_memory_repo` em disco
 │   │   │
 │   │   └── concurrency/        <-- "ensure that there are no data races"
 │   │       ├── __init__.py

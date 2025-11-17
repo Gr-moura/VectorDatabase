@@ -1,6 +1,5 @@
 # tests/test_services/test_services.py
 import pytest
-from types import SimpleNamespace
 from uuid import uuid4, UUID
 from unittest.mock import Mock
 
@@ -18,23 +17,20 @@ class FakeLibrary:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
-        self.uid = getattr(self, "uid", kwargs.get("uid", uuid4()))
+
+        self.uid = getattr(self, "uid", uuid4())
         self.documents = getattr(self, "documents", {})
+        self.indices = getattr(self, "indices", {})
+        self.index_metadata = getattr(self, "index_metadata", {})
 
     def model_copy(self, update: dict | None = None):
         """Return a new FakeLibrary with fields from self merged with update."""
-        data = {**self.__dict__}
-        # remove internal attributes that shouldn't be passed directly
-        # keep documents as-is
+        data = self.__dict__.copy()
         if update:
             data.update(update)
-        # create new instance
-        new = FakeLibrary(
-            **{k: v for k, v in data.items() if k != "_sa_instance_state"}
-        )
-        # ensure documents mapping exists
-        new.documents = dict(self.documents)
-        return new
+
+        # Pass all current attributes to the new instance's constructor
+        return FakeLibrary(**data)
 
 
 class FakeDocument:

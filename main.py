@@ -5,7 +5,12 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from src.api.endpoints import libraries, documents, chunks, search
-from src.core.exceptions import LibraryNotFound, DocumentNotFound, ChunkNotFound
+from src.core.exceptions import (
+    LibraryNotFound,
+    DocumentNotFound,
+    ChunkNotFound,
+    IndexNotReady,
+)
 
 # Create the main FastAPI application
 app = FastAPI(
@@ -17,6 +22,14 @@ app = FastAPI(
 # ============================================================================
 # EXCEPTION HANDLERS
 # ============================================================================
+
+
+@app.exception_handler(IndexNotReady)
+async def index_not_ready_exception_handler(request: Request, exc: IndexNotReady):
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,  # 409 Conflict is a good choice here
+        content={"detail": str(exc)},
+    )
 
 
 @app.exception_handler(LibraryNotFound)

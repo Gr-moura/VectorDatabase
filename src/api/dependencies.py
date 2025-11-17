@@ -1,32 +1,49 @@
 # vector_db_project/src/api/dependencies.py
 
+from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.infrastructure.repositories.in_memory_repo import InMemoryLibraryRepository
 from src.services.library_service import LibraryService
 from src.services.document_service import DocumentService
 from src.services.chunk_service import ChunkService
 from src.services.search_service import SearchService
-from src.core.indexing.flat_index import FlatIndex
+
+# ============================================================================
+# SINGLETON INSTANCES
+# ============================================================================
 
 # Create a single repository instance to be shared across the application lifecycle.
-# This simulates a database connection pool.
-library_repository = InMemoryLibraryRepository()
+# This acts as our in-memory "database". Its state is shared across all requests.
+# The type hint ensures we can easily swap it for another implementation later.
+library_repository: ILibraryRepository = InMemoryLibraryRepository()
 
-# Create a single index instance for the same reason.
-# In a real app, you might have a factory that creates indexes per library.
-vector_index = FlatIndex()
+
+# ============================================================================
+# DEPENDENCY PROVIDERS (GETTERS)
+# ============================================================================
+
+# Each of these functions is a "dependency" that FastAPI can inject into
+# your API endpoint functions.
 
 
 def get_library_service() -> LibraryService:
+    """Provides a LibraryService instance initialized with our singleton repository."""
     return LibraryService(repository=library_repository)
 
 
 def get_document_service() -> DocumentService:
+    """Provides a DocumentService instance initialized with our singleton repository."""
     return DocumentService(repository=library_repository)
 
 
 def get_chunk_service() -> ChunkService:
+    """Provides a ChunkService instance initialized with our singleton repository."""
     return ChunkService(repository=library_repository)
 
 
 def get_search_service() -> SearchService:
-    return SearchService(repository=library_repository, index=vector_index)
+    """
+    Provides a SearchService instance.
+    Since SearchService is now stateless (it operates on the index stored within
+    the Library object), we can create a new instance for each request without issue.
+    """
+    return SearchService(repository=library_repository)

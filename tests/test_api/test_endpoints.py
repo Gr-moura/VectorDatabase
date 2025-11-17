@@ -5,9 +5,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from main import app
-from src.api.dependencies import (
-    library_repository,
-)  # Import the singleton for state management
+from src.api.dependencies import library_repository
 
 
 @pytest.fixture

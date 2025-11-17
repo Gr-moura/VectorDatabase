@@ -3,11 +3,62 @@
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from uuid import UUID
-from src.core.models import Chunk, Document, Library
+
+# Import core domain models that response schemas will be built FROM
+from src.core.models import Chunk, Document, Library, IndexMetadata
+
+# Import core enums that are used in request schemas
+from src.core.indexing.enums import IndexType, Metric
+
+API_MODEL_CONFIG = {"from_attributes": True}
+
+# ============================================================================
+# INDEX SCHEMAS
+# ============================================================================
+
+
+class IndexCreate(BaseModel):
+    """Request model for creating a new vector index."""
+
+    # This is the user's input, so we only include what they can control.
+    index_type: IndexType = Field(
+        default=IndexType.AVL,
+        description="The type of index to build ('avl' for dynamic exact search).",
+    )
+    metric: Metric = Field(
+        default=Metric.COSINE,
+        description="Distance metric for the index (cosine or euclidean).",
+    )
+
+
+class IndexConfigResponse(BaseModel):
+    """Schema for the 'config' part of an index status response."""
+
+    model_config = API_MODEL_CONFIG
+    index_type: IndexType
+    metric: Metric
+
+
+class IndexStatusResponse(BaseModel):
+    """Response model for the status of a specific index."""
+
+    model_config = API_MODEL_CONFIG
+    name: str
+    config: IndexConfigResponse  # Use the dedicated response schema
+    vector_count: int
+    index_type: str
+
+
+class AllIndicesStatusResponse(BaseModel):
+    """Response model for the status of all indices in a library."""
+
+    model_config = API_MODEL_CONFIG
+    indices: Dict[str, IndexStatusResponse]
+
 
 # ============================================================================
 # CHUNK SCHEMAS
-# ============================================================================
+# ===========================================================================
 
 
 class ChunkCreate(BaseModel):
@@ -23,7 +74,7 @@ class ChunkUpdate(BaseModel):
 
 
 class ChunkResponse(Chunk):
-    model_config = {"from_attributes": True}
+    model_config = API_MODEL_CONFIG
     id: UUID
     document_id: UUID
     library_id: UUID
@@ -34,7 +85,7 @@ class ChunkResponse(Chunk):
             id=chunk.uid,
             document_id=document_id,
             library_id=library_id,
-            **chunk.model_dump()
+            **chunk.model_dump(exclude={"uid"}),
         )
 
 
@@ -53,7 +104,7 @@ class DocumentUpdate(BaseModel):
 
 
 class DocumentResponse(BaseModel):
-    model_config = {"from_attributes": True}
+    model_config = API_MODEL_CONFIG
     id: UUID
     library_id: UUID
     metadata: Dict[str, Any]
@@ -78,7 +129,7 @@ class LibraryUpdate(BaseModel):
 
 
 class LibraryResponse(BaseModel):
-    model_config = {"from_attributes": True}
+    model_config = API_MODEL_CONFIG
     id: UUID
     metadata: Dict[str, Any]
     documents: Dict[UUID, Document]
@@ -91,13 +142,20 @@ class LibraryResponse(BaseModel):
 # ============================================================================
 # SEARCH SCHEMAS
 # ============================================================================
-
-
 class SearchQuery(BaseModel):
-    query_embedding: List[float]
-    k: int = Field(3, gt=0)
+    """Request model for a vector search query."""
+
+    query_embedding: List[float] = Field(
+        ..., description="The embedding vector for the query."
+    )
+    k: int = Field(3, gt=0, description="The number of nearest neighbors to return.")
 
 
 class SearchResult(BaseModel):
+    """Response model for a single search result item."""
+
     chunk: Chunk
-    similarity: float
+    similarity: float = Field(
+        ...,
+        description="The search score. For cosine, higher is better. For euclidean, lower is better.",
+    )

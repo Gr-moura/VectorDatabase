@@ -2,34 +2,17 @@
 
 from uuid import UUID
 from typing import List
-from src.core.models import Chunk
+from src.core.models import Library, Chunk
 from src.api.schemas import ChunkCreate, ChunkUpdate
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.exceptions import DocumentNotFound
 from src.core.exceptions import ChunkNotFound
+from src.core.indexing.avl_index import AvlIndex
 
 
 class ChunkService:
     def __init__(self, repository: ILibraryRepository):
         self.repository = repository
-
-    def create_chunk(
-        self, library_id: UUID, doc_id: UUID, chunk_create: ChunkCreate
-    ) -> Chunk:
-        library = self.repository.get_by_id(library_id)
-        document = library.documents.get(doc_id)
-        if not document:
-            # This check is now implicit, but good to be aware of
-            raise DocumentNotFound(
-                f"Document {doc_id} not found in library {library_id}"
-            )
-
-        chunk = Chunk(**chunk_create.model_dump())
-        document.chunks[chunk.uid] = chunk
-
-        self.repository.update(library)
-
-        return chunk
 
     def get_chunk(self, library_id: UUID, doc_id: UUID, chunk_id: UUID) -> Chunk:
         library = self.repository.get_by_id(library_id)
@@ -53,6 +36,54 @@ class ChunkService:
             )
         return list(document.chunks.values())
 
+    def _update_indices_on_add_update(self, library: Library, chunk: Chunk):
+        """Updates all indices of a library after a chunk addition/update."""
+        for index_name, index in library.indices.items():
+            if isinstance(index, AvlIndex):
+                index.insert(chunk)
+
+                # Also update the corresponding metadata object.
+                if index_name in library.index_metadata:
+                    library.index_metadata[index_name].vector_count = index.vector_count
+
+                print(f"AvlIndex '{index_name}' updated for chunk {chunk.uid}.")
+            else:
+                pass  # Handle other index types as needed
+
+    def _update_indices_on_delete(self, library: Library, chunk_id: UUID):
+        """Updates all indices of a library after a chunk deletion."""
+        for index_name, index in list(library.indices.items()):
+            if isinstance(index, AvlIndex):
+                index.delete(chunk_id)
+
+                # Also update the corresponding metadata object.
+                if index_name in library.index_metadata:
+                    library.index_metadata[index_name].vector_count = index.vector_count
+
+                print(f"Chunk {chunk_id} deleted from AvlIndex '{index_name}'.")
+            else:
+                pass  # Handle other index types as needed
+
+    def create_chunk(
+        self, library_id: UUID, doc_id: UUID, chunk_create: ChunkCreate
+    ) -> Chunk:
+        library = self.repository.get_by_id(library_id)
+        document = library.documents.get(doc_id)
+        if not document:
+            # This check is now implicit, but good to be aware of
+            raise DocumentNotFound(
+                f"Document {doc_id} not found in library {library_id}"
+            )
+
+        chunk = Chunk(**chunk_create.model_dump())
+        document.chunks[chunk.uid] = chunk
+
+        self._update_indices_on_add_update(library, chunk)
+
+        self.repository.update(library)
+
+        return chunk
+
     def update_chunk(
         self, library_id: UUID, doc_id: UUID, chunk_id: UUID, chunk_update: ChunkUpdate
     ) -> Chunk:
@@ -72,6 +103,7 @@ class ChunkService:
 
         document.chunks[chunk_id] = updated_chunk
 
+        self._update_indices_on_add_update(library, updated_chunk)
         self.repository.update(library)
 
         return updated_chunk
@@ -89,4 +121,5 @@ class ChunkService:
 
         del document.chunks[chunk_id]
 
+        self._update_indices_on_delete(library, chunk_id)
         self.repository.update(library)

@@ -9,79 +9,7 @@ from src.services import library_service, document_service, chunk_service
 # Import exceptions (these are referenced by the services)
 from src.core import exceptions as core_exceptions
 
-
-# -------------------------
-# Helper fake model classes
-# -------------------------
-class FakeLibrary:
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-        self.uid = getattr(self, "uid", uuid4())
-        self.documents = getattr(self, "documents", {})
-        self.indices = getattr(self, "indices", {})
-        self.index_metadata = getattr(self, "index_metadata", {})
-
-    def model_copy(self, update: dict | None = None):
-        """Return a new FakeLibrary with fields from self merged with update."""
-        data = self.__dict__.copy()
-        if update:
-            data.update(update)
-
-        # Pass all current attributes to the new instance's constructor
-        return FakeLibrary(**data)
-
-
-class FakeDocument:
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.uid = getattr(self, "uid", kwargs.get("uid", uuid4()))
-        self.chunks = getattr(self, "chunks", {})
-
-    def model_copy(self, update: dict | None = None):
-        data = {**self.__dict__}
-        if update:
-            data.update(update)
-        new = FakeDocument(
-            **{k: v for k, v in data.items() if k != "_sa_instance_state"}
-        )
-        # preserve chunks mapping if not overridden
-        new.chunks = dict(self.chunks)
-        return new
-
-
-class FakeChunk:
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.uid = getattr(self, "uid", kwargs.get("uid", uuid4()))
-
-    def model_copy(self, update: dict | None = None):
-        data = {**self.__dict__}
-        if update:
-            data.update(update)
-        new = FakeChunk(**{k: v for k, v in data.items() if k != "_sa_instance_state"})
-        return new
-
-
-# Minimal schema-like objects that provide model_dump as used by services
-class FakeSchema:
-    def __init__(self, data: dict):
-        # store raw data
-        self._data = dict(data)
-
-    def model_dump(self, exclude_unset=False, exclude=None):
-        # mimic Pydantic's behavior used in services:
-        if exclude and isinstance(exclude, set):
-            return {k: v for k, v in self._data.items() if k not in exclude}
-        return dict(self._data)
-
-    @property
-    def chunks(self):
-        # return the raw chunks list if present (expected to be list of FakeSchema)
-        return self._data.get("chunks")
+from ..fakes import FakeLibrary, FakeDocument, FakeChunk, FakeSchema
 
 
 # -------------------------
@@ -92,21 +20,24 @@ def repo_mock():
     return Mock(spec=["add", "get_by_id", "update", "delete", "list_all"])
 
 
+@pytest.fixture
+def embeddings_client_mock():
+    """Provides a mock for the embeddings client."""
+    mock = Mock(spec=["get_embeddings"])
+    mock.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
+    return mock
+
+
 @pytest.fixture(autouse=True)
 def patch_models(monkeypatch):
     """
-    Replace imported model names in the service modules so the services
-    construct our fake classes instead of real project models.
+    Replaces real domain models with our fake classes inside the service modules
+    to ensure the services are unit tested in isolation.
     """
     monkeypatch.setattr(library_service, "Library", FakeLibrary)
-    monkeypatch.setattr(library_service, "UUID", UUID, raising=False)
-
     monkeypatch.setattr(document_service, "Document", FakeDocument)
     monkeypatch.setattr(document_service, "Chunk", FakeChunk)
-    monkeypatch.setattr(document_service, "UUID", UUID, raising=False)
-
     monkeypatch.setattr(chunk_service, "Chunk", FakeChunk)
-    monkeypatch.setattr(chunk_service, "UUID", UUID, raising=False)
 
 
 # -------------------------
@@ -273,26 +204,37 @@ def test_delete_document_missing_raises(repo_mock):
 # -------------------------
 # Tests for ChunkService
 # -------------------------
-def test_create_chunk_adds_chunk_and_updates_repo(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_create_chunk_adds_chunk_and_updates_repo(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+
     lib_id = uuid4()
     doc_id = uuid4()
-    lib = FakeLibrary(
-        uid=lib_id, documents={doc_id: FakeDocument(uid=doc_id, chunks={})}
-    )
-    repo_mock.get_by_id.return_value = lib
+
+    # Create a FakeDocument with an empty chunks dict
+    fake_doc = FakeDocument(uid=doc_id, chunks={})
+
+    # Create a FakeLibrary containing this document
+    fake_lib = FakeLibrary(uid=lib_id, documents={doc_id: fake_doc})
+    repo_mock.get_by_id.return_value = fake_lib
 
     chunk_uid = uuid4()
     chunk_schema = FakeSchema({"uid": chunk_uid, "text": "c"})
 
+    # --- ACTION ---
     created = svc.create_chunk(lib_id, doc_id, chunk_schema)
+
+    # --- ASSERTIONS ---
     assert created.uid == chunk_uid
-    assert chunk_uid in lib.documents[doc_id].chunks
-    repo_mock.update.assert_called_once_with(lib)
+    assert chunk_uid in fake_doc.chunks
+    repo_mock.update.assert_called_once_with(fake_lib)
 
 
-def test_create_chunk_missing_document_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_create_chunk_missing_document_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     lib = FakeLibrary(uid=lib_id, documents={})  # no documents
     repo_mock.get_by_id.return_value = lib
@@ -301,8 +243,10 @@ def test_create_chunk_missing_document_raises(repo_mock):
         svc.create_chunk(lib_id, uuid4(), FakeSchema({"uid": uuid4()}))
 
 
-def test_get_chunk_returns_chunk(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_get_chunk_returns_chunk(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     chunk_id = uuid4()
@@ -315,16 +259,20 @@ def test_get_chunk_returns_chunk(repo_mock):
     assert got is chunk
 
 
-def test_get_chunk_missing_document_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_get_chunk_missing_document_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib = FakeLibrary(uid=uuid4(), documents={})
     repo_mock.get_by_id.return_value = lib
     with pytest.raises(core_exceptions.DocumentNotFound):
         svc.get_chunk(lib.uid, uuid4(), uuid4())
 
 
-def test_get_chunk_missing_chunk_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_get_chunk_missing_chunk_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id, chunks={})
@@ -335,8 +283,10 @@ def test_get_chunk_missing_chunk_raises(repo_mock):
         svc.get_chunk(lib_id, doc_id, uuid4())
 
 
-def test_list_chunks_returns_list(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_list_chunks_returns_list(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     c1 = FakeChunk(uid=uuid4())
@@ -348,8 +298,10 @@ def test_list_chunks_returns_list(repo_mock):
     assert set(out) == {c1, c2}
 
 
-def test_update_chunk_merges_and_updates(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_update_chunk_merges_and_updates(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     chunk_id = uuid4()
@@ -367,16 +319,20 @@ def test_update_chunk_merges_and_updates(repo_mock):
     assert lib.documents[doc_id].chunks[chunk_id] is updated
 
 
-def test_update_chunk_missing_document_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_update_chunk_missing_document_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib = FakeLibrary(uid=uuid4(), documents={})
     repo_mock.get_by_id.return_value = lib
     with pytest.raises(core_exceptions.DocumentNotFound):
         svc.update_chunk(lib.uid, uuid4(), uuid4(), FakeSchema({"text": "x"}))
 
 
-def test_update_chunk_missing_chunk_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_update_chunk_missing_chunk_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id, chunks={})
@@ -387,8 +343,10 @@ def test_update_chunk_missing_chunk_raises(repo_mock):
         svc.update_chunk(lib_id, doc_id, uuid4(), FakeSchema({"text": "x"}))
 
 
-def test_delete_chunk_removes_and_updates(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_delete_chunk_removes_and_updates(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     chunk_id = uuid4()
@@ -402,16 +360,20 @@ def test_delete_chunk_removes_and_updates(repo_mock):
     repo_mock.update.assert_called_once_with(lib)
 
 
-def test_delete_chunk_missing_document_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_delete_chunk_missing_document_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib = FakeLibrary(uid=uuid4(), documents={})
     repo_mock.get_by_id.return_value = lib
     with pytest.raises(core_exceptions.DocumentNotFound):
         svc.delete_chunk(lib.uid, uuid4(), uuid4())
 
 
-def test_delete_chunk_missing_chunk_raises(repo_mock):
-    svc = chunk_service.ChunkService(repository=repo_mock)
+def test_delete_chunk_missing_chunk_raises(repo_mock, embeddings_client_mock):
+    svc = chunk_service.ChunkService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id, chunks={})

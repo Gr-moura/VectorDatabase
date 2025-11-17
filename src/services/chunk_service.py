@@ -8,11 +8,15 @@ from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.exceptions import DocumentNotFound
 from src.core.exceptions import ChunkNotFound
 from src.core.indexing.avl_index import AvlIndex
+from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 
 
 class ChunkService:
-    def __init__(self, repository: ILibraryRepository):
+    def __init__(
+        self, repository: ILibraryRepository, embeddings_client: IEmbeddingsClient
+    ):
         self.repository = repository
+        self.embeddings_client = embeddings_client
 
     def get_chunk(self, library_id: UUID, doc_id: UUID, chunk_id: UUID) -> Chunk:
         library = self.repository.get_by_id(library_id)
@@ -67,6 +71,10 @@ class ChunkService:
     def create_chunk(
         self, library_id: UUID, doc_id: UUID, chunk_create: ChunkCreate
     ) -> Chunk:
+        embedding_was_provided = "embedding" in chunk_create.model_dump(
+            exclude_unset=True
+        )
+
         library = self.repository.get_by_id(library_id)
         document = library.documents.get(doc_id)
         if not document:
@@ -76,6 +84,9 @@ class ChunkService:
             )
 
         chunk = Chunk(**chunk_create.model_dump())
+        if not embedding_was_provided and chunk.text:
+            chunk.embedding = self.embeddings_client.get_embeddings([chunk.text])[0]
+
         document.chunks[chunk.uid] = chunk
 
         self._update_indices_on_add_update(library, chunk)

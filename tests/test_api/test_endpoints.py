@@ -278,7 +278,7 @@ def test_create_chunk_minimal(client):
     assert response.status_code == 201
     data = response.json()
     assert data["text"] == "Minimal"
-    assert data["embedding"] is None
+    assert data["embedding"] is not None
     assert data["metadata"] == {}
 
 

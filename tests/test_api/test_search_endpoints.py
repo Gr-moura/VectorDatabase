@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from fastapi import status
 import numpy as np
 
+from tests.test_api.test_endpoints import create_chunk_via_api
+
 # Pytest will automatically discover and inject fixtures from conftest.py
 # No imports from conftest.py are needed.
 
@@ -231,8 +233,9 @@ def test_search_on_library_with_no_embeddings_returns_empty(
     """
     lib = create_library_via_api()
     doc = create_document_via_api(library_id=lib["id"])
-    create_chunk_via_api(lib["id"], doc["id"], {"text": "text but no embedding"})
-
+    create_chunk_via_api(
+        lib["id"], doc["id"], {"text": "text but no embedding", "embedding": None}
+    )
     index_name = "empty-vector-index"
     create_index_via_api(lib["id"], index_name, {"index_type": "avl"})
 

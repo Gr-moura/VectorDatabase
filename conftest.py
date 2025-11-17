@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional, Generator
 from fastapi.testclient import TestClient
 
 from main import app
-from src.api.dependencies import library_repository
+from src.api.dependencies import library_repository, get_embeddings_client
+from src.infrastructure.embeddings.fake_client import FakeEmbeddingsClient
 
 # ============================================================================
 # Core Pytest Fixtures
@@ -15,8 +16,21 @@ from src.api.dependencies import library_repository
 
 @pytest.fixture(scope="session")
 def client() -> Generator[TestClient, Any, None]:
+
+    # Define a function that will provide the FAKE client during tests.
+    def get_fake_embeddings_client_override():
+        return FakeEmbeddingsClient(dimension=3)  # Use our 3D test vectors
+
+    # Tell the FastAPI app to use our fake provider instead of the real one.
+    app.dependency_overrides[get_embeddings_client] = (
+        get_fake_embeddings_client_override
+    )
+
     with TestClient(app) as test_client:
         yield test_client
+
+    # Clean up the override after tests are done
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)

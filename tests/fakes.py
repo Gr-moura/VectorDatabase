@@ -1,0 +1,97 @@
+# tests/fakes.py
+
+from uuid import uuid4
+from typing import Dict, Any, List, Optional
+
+# ============================================================================
+# Fake Domain Model Classes for Unit Testing
+# ============================================================================
+
+
+class FakeChunk:
+    """A fake version of the core.models.Chunk for unit tests."""
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.uid = getattr(self, "uid", uuid4())
+        self.embedding = getattr(self, "embedding", None)
+        self.text = getattr(self, "text", "")
+        self.metadata = getattr(self, "metadata", {})
+
+    def model_copy(self, update: Optional[Dict[str, Any]] = None) -> "FakeChunk":
+        data = self.__dict__.copy()
+        if update:
+            data.update(update)
+        return FakeChunk(**data)
+
+
+class FakeDocument:
+    """A fake version of the core.models.Document for unit tests."""
+
+    def __init__(self, uid=None, chunks=None, **kwargs):
+        self.uid = uid or uuid4()
+        self.chunks = chunks if chunks is not None else {}
+        self.metadata = kwargs.get("metadata", {})
+        # Set any other passed attributes
+        for k, v in kwargs.items():
+            if not hasattr(self, k):
+                setattr(self, k, v)
+
+    def model_copy(self, update: Optional[Dict[str, Any]] = None) -> "FakeDocument":
+        data = self.__dict__.copy()
+        if update:
+            data.update(update)
+        # Ensure chunks is a new dict to prevent side effects
+        new_doc = FakeDocument(**data)
+        new_doc.chunks = dict(self.chunks)
+        return new_doc
+
+
+class FakeLibrary:
+    """A fake version of the core.models.Library for unit tests."""
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+        # Ensure that all attributes expected by services always exist
+        self.uid = getattr(self, "uid", uuid4())
+        self.documents = getattr(self, "documents", {})
+        self.indices = getattr(self, "indices", {})
+        self.index_metadata = getattr(self, "index_metadata", {})
+        self.metadata = getattr(self, "metadata", {})
+
+    def model_copy(self, update: Optional[Dict[str, Any]] = None) -> "FakeLibrary":
+        data = self.__dict__.copy()
+        if update:
+            data.update(update)
+        # Ensure nested dicts are copied to prevent test contamination
+        new_lib = FakeLibrary(**data)
+        new_lib.documents = dict(self.documents)
+        new_lib.indices = dict(self.indices)
+        new_lib.index_metadata = dict(self.index_metadata)
+        return new_lib
+
+
+# ============================================================================
+# Fake API Schema Classes for Unit Testing
+# ============================================================================
+
+
+class FakeSchema:
+    """A minimal fake for api.schemas objects that provides model_dump()."""
+
+    def __init__(self, data: Dict[str, Any]):
+        self._data = dict(data)
+        self.chunks: Optional[List["FakeSchema"]] = self._data.get("chunks")
+
+    def model_dump(
+        self, exclude_unset: bool = False, exclude: Optional[set] = None
+    ) -> Dict[str, Any]:
+        """Mimics Pydantic's model_dump behavior used in services."""
+        if exclude_unset:
+            return dict(self._data)
+        if exclude:
+            return {k: v for k, v in self._data.items() if k not in exclude}
+        return dict(self._data)

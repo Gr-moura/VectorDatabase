@@ -1,11 +1,15 @@
 # vector_db_project/src/api/dependencies.py
 
+from fastapi.params import Depends
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.infrastructure.repositories.in_memory_repo import InMemoryLibraryRepository
 from src.services.library_service import LibraryService
 from src.services.document_service import DocumentService
 from src.services.chunk_service import ChunkService
 from src.services.search_service import SearchService
+from src.infrastructure.embeddings.base_client import IEmbeddingsClient
+from src.infrastructure.embeddings.cohere_client import CohereClient
+
 
 # ============================================================================
 # SINGLETON INSTANCES
@@ -47,3 +51,17 @@ def get_search_service() -> SearchService:
     the Library object), we can create a new instance for each request without issue.
     """
     return SearchService(repository=library_repository)
+
+
+def get_embeddings_client() -> IEmbeddingsClient:
+    """Provides a real Cohere embeddings client for the application."""
+    return CohereClient()
+
+
+def get_chunk_service(
+    embeddings_client: IEmbeddingsClient = Depends(get_embeddings_client),
+) -> ChunkService:
+    """Provides a ChunkService with necessary dependencies."""
+    return ChunkService(
+        repository=library_repository, embeddings_client=embeddings_client
+    )

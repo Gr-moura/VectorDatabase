@@ -63,13 +63,11 @@ class AllIndicesStatusResponse(BaseModel):
 
 class ChunkCreate(BaseModel):
     text: str = Field(..., min_length=1)
-    embedding: Optional[List[float]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ChunkUpdate(BaseModel):
     text: Optional[str] = Field(None, min_length=1)
-    embedding: Optional[List[float]] = None
     metadata: Optional[Dict[str, Any]] = None
 
 

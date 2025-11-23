@@ -71,9 +71,6 @@ class ChunkService:
     def create_chunk(
         self, library_id: UUID, doc_id: UUID, chunk_create: ChunkCreate
     ) -> Chunk:
-        embedding_was_provided = "embedding" in chunk_create.model_dump(
-            exclude_unset=True
-        )
 
         library = self.repository.get_by_id(library_id)
         document = library.documents.get(doc_id)
@@ -84,7 +81,7 @@ class ChunkService:
             )
 
         chunk = Chunk(**chunk_create.model_dump())
-        if not embedding_was_provided and chunk.text:
+        if chunk.text:
             chunk.embedding = self.embeddings_client.get_embeddings([chunk.text])[0]
 
         document.chunks[chunk.uid] = chunk
@@ -110,11 +107,20 @@ class ChunkService:
             raise ChunkNotFound(f"Chunk {chunk_id} not found in document {doc_id}")
 
         update_data = chunk_update.model_dump(exclude_unset=True)
-        updated_chunk = chunk.model_copy(update=update_data)
 
+        if chunk_update.text is not None:
+            new_embedding = self.embeddings_client.get_embeddings([chunk_update.text])[
+                0
+            ]
+            update_data["embedding"] = new_embedding
+
+        updated_chunk = chunk.model_copy(update=update_data)
         document.chunks[chunk_id] = updated_chunk
 
-        self._update_indices_on_add_update(library, updated_chunk)
+        # Update indices only if text was changed (and thus embedding)
+        if chunk_update.text is not None:
+            self._update_indices_on_add_update(library, updated_chunk)
+
         self.repository.update(library)
 
         return updated_chunk

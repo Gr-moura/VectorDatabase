@@ -36,29 +36,6 @@ def test_create_chunk_without_embedding_generates_one(
     assert created_chunk["embedding"] == expected_embedding
 
 
-def test_create_chunk_with_embedding_bypasses_generation(
-    client, create_library_via_api, create_document_via_api, create_chunk_via_api
-):
-    """
-    QA Goal: Verify that if a user provides their own embedding, the system
-    respects it and does not call the embeddings client.
-    """
-    # 1. SETUP
-    lib = create_library_via_api()
-    doc = create_document_via_api(library_id=lib["id"])
-
-    # 2. ACTION: Create a chunk, providing a custom embedding.
-    custom_embedding = [0.99, 0.98, 0.97]
-    payload = {"text": "some text", "embedding": custom_embedding}
-    created_chunk = create_chunk_via_api(
-        library_id=lib["id"], document_id=doc["id"], payload=payload
-    )
-
-    # 3. VERIFY
-    assert "embedding" in created_chunk
-    assert created_chunk["embedding"] == custom_embedding
-
-
 # ============================================================================
 # Test Search Correctness with Auto-Generated Embeddings
 # ============================================================================
@@ -106,3 +83,53 @@ def test_search_works_correctly_with_generated_embeddings(
     result_texts = [res["chunk"]["text"] for res in results]
     assert result_texts[0] == "puppy"
     assert result_texts[1] == "dog"
+
+
+def test_create_document_with_chunks_automatically_indexes_them(
+    client, create_library_via_api, create_index_via_api
+):
+    """
+    QA Goal: End-to-end verification that creating a document with nested chunks
+    1. Generates embeddings
+    2. Updates the live index
+    3. Makes them immediately searchable
+    """
+    # 1. Setup Library and Index
+    lib = create_library_via_api()
+    index_name = "live-index"
+    create_index_via_api(lib["id"], index_name, {"index_type": "avl"})
+
+    # 2. Create Document with Nested Chunks
+    doc_payload = {
+        "metadata": {"title": "Batch Doc"},
+        "chunks": [
+            {"text": "cat"},  # Should get [0.1, 0.2, 0.8]
+            {"text": "computer"},  # Should get [0.1, 0.9, 0.1]
+        ],
+    }
+
+    response = client.post(f"/libraries/{lib['id']}/documents", json=doc_payload)
+    assert response.status_code == status.HTTP_201_CREATED
+    doc_data = response.json()
+
+    # 3. Verify Response Data
+    assert len(doc_data["chunks"]) == 2
+    # Verify embeddings are present in the response
+    first_chunk_id = list(doc_data["chunks"].keys())[0]
+    assert doc_data["chunks"][first_chunk_id]["embedding"] is not None
+
+    # 4. Verify Index Status
+    status_res = client.get(f"/libraries/{lib['id']}/index/{index_name}")
+    assert status_res.json()["vector_count"] == 2
+
+    # 5. Verify Search
+    # Search for "kitten" -> should match "cat"
+    query_vector = [0.15, 0.25, 0.75]
+    search_res = client.post(
+        f"/libraries/{lib['id']}/search/{index_name}",
+        json={"query_embedding": query_vector, "k": 1},
+    )
+    assert search_res.status_code == status.HTTP_200_OK
+    results = search_res.json()
+    assert len(results) == 1
+    assert results[0]["chunk"]["text"] == "cat"

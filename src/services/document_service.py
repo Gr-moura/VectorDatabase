@@ -2,15 +2,20 @@
 
 from uuid import UUID
 from typing import List
-from src.core.models import Document, Chunk
+from src.core.models import Document, Chunk, Library
+from src.core.indexing.avl_index import AvlIndex
 from src.api.schemas import DocumentCreate, DocumentUpdate
 from src.infrastructure.repositories.base_repo import ILibraryRepository
+from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 from src.core.exceptions import DocumentNotFound
 
 
 class DocumentService:
-    def __init__(self, repository: ILibraryRepository):
+    def __init__(
+        self, repository: ILibraryRepository, embeddings_client: IEmbeddingsClient
+    ):
         self.repository = repository
+        self.embeddings_client = embeddings_client
 
     def create_document(self, library_id: UUID, doc_create: DocumentCreate) -> Document:
         library = self.repository.get_by_id(library_id)
@@ -18,14 +23,46 @@ class DocumentService:
         document_data = doc_create.model_dump(exclude={"chunks"})
         document = Document(**document_data)
 
+        # Batch processing of chunk embeddings
         if doc_create.chunks:
+            chunks_to_embed: List[Chunk] = []
+            texts_to_embed: List[str] = []
+
+            temp_chunks = []
             for chunk_create in doc_create.chunks:
                 chunk = Chunk(**chunk_create.model_dump())
+
+                if chunk.text:
+                    chunks_to_embed.append(chunk)
+                    texts_to_embed.append(chunk.text)
+
+                temp_chunks.append(chunk)
+
+            if texts_to_embed:
+                vectors = self.embeddings_client.get_embeddings(texts_to_embed)
+
+                for chunk, vector in zip(chunks_to_embed, vectors):
+                    chunk.embedding = vector
+
+            for chunk in temp_chunks:
                 document.chunks[chunk.uid] = chunk
+                self._update_indices_on_add(library, chunk)
 
         library.documents[document.uid] = document
         self.repository.update(library)
         return document
+
+    def _update_indices_on_add(self, library: Library, chunk: Chunk):
+        if not chunk.embedding:
+            return
+
+        for index_name, index in library.indices.items():
+            if isinstance(index, AvlIndex):
+                index.insert(chunk)
+                if index_name in library.index_metadata:
+                    library.index_metadata[index_name].vector_count = index.vector_count
+            else:
+                pass
 
     def get_document(self, library_id: UUID, doc_id: UUID) -> Document:
         library = self.repository.get_by_id(library_id)

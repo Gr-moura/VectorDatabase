@@ -29,14 +29,23 @@ library_repository: ILibraryRepository = InMemoryLibraryRepository()
 # your API endpoint functions.
 
 
+def get_embeddings_client() -> IEmbeddingsClient:
+    """Provides a real Cohere embeddings client for the application."""
+    return CohereClient()
+
+
 def get_library_service() -> LibraryService:
     """Provides a LibraryService instance initialized with our singleton repository."""
     return LibraryService(repository=library_repository)
 
 
-def get_document_service() -> DocumentService:
-    """Provides a DocumentService instance initialized with our singleton repository."""
-    return DocumentService(repository=library_repository)
+def get_document_service(
+    embeddings_client: IEmbeddingsClient = Depends(get_embeddings_client),
+) -> DocumentService:
+    """Provides a DocumentService instance."""
+    return DocumentService(
+        repository=library_repository, embeddings_client=embeddings_client
+    )
 
 
 def get_chunk_service() -> ChunkService:
@@ -51,11 +60,6 @@ def get_search_service() -> SearchService:
     the Library object), we can create a new instance for each request without issue.
     """
     return SearchService(repository=library_repository)
-
-
-def get_embeddings_client() -> IEmbeddingsClient:
-    """Provides a real Cohere embeddings client for the application."""
-    return CohereClient()
 
 
 def get_chunk_service(

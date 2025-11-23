@@ -84,7 +84,17 @@ class FakeSchema:
 
     def __init__(self, data: Dict[str, Any]):
         self._data = dict(data)
+        # Initialize chunks specifically if present
         self.chunks: Optional[List["FakeSchema"]] = self._data.get("chunks")
+
+    def __getattr__(self, name):
+        """
+        Dynamically return attributes from the internal data dict.
+        This allows schema.text, schema.uid, etc. to work.
+        """
+        if name in self._data:
+            return self._data[name]
+        return None
 
     def model_dump(
         self, exclude_unset: bool = False, exclude: Optional[set] = None

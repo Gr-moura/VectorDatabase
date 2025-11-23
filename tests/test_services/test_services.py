@@ -102,8 +102,10 @@ def test_list_libraries_returns_repo_list_all(repo_mock):
 # -------------------------
 # Tests for DocumentService
 # -------------------------
-def test_create_document_adds_document_and_chunks(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_create_document_adds_document_and_chunks(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     lib = FakeLibrary(uid=lib_id, documents={})
     repo_mock.get_by_id.return_value = lib
@@ -127,8 +129,10 @@ def test_create_document_adds_document_and_chunks(repo_mock):
     assert isinstance(created, FakeDocument)
 
 
-def test_get_document_not_found_raises(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_get_document_not_found_raises(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     lib = FakeLibrary(uid=lib_id, documents={})
     repo_mock.get_by_id.return_value = lib
@@ -137,8 +141,10 @@ def test_get_document_not_found_raises(repo_mock):
         svc.get_document(lib_id, uuid4())
 
 
-def test_get_document_returns_document(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_get_document_returns_document(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id)
@@ -149,8 +155,10 @@ def test_get_document_returns_document(repo_mock):
     assert got is doc
 
 
-def test_list_documents_returns_all(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_list_documents_returns_all(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc1 = FakeDocument(uid=uuid4())
     doc2 = FakeDocument(uid=uuid4())
@@ -161,8 +169,10 @@ def test_list_documents_returns_all(repo_mock):
     assert set(out) == {doc1, doc2}
 
 
-def test_update_document_merges_and_updates(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_update_document_merges_and_updates(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id, title="old")
@@ -178,8 +188,10 @@ def test_update_document_merges_and_updates(repo_mock):
     assert lib.documents[doc_id] is updated
 
 
-def test_delete_document_deletes_and_updates_repo(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_delete_document_deletes_and_updates_repo(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     doc_id = uuid4()
     doc = FakeDocument(uid=doc_id)
@@ -191,14 +203,103 @@ def test_delete_document_deletes_and_updates_repo(repo_mock):
     repo_mock.update.assert_called_once_with(lib)
 
 
-def test_delete_document_missing_raises(repo_mock):
-    svc = document_service.DocumentService(repository=repo_mock)
+def test_delete_document_missing_raises(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
     lib_id = uuid4()
     lib = FakeLibrary(uid=lib_id, documents={})
     repo_mock.get_by_id.return_value = lib
 
     with pytest.raises(core_exceptions.DocumentNotFound):
         svc.delete_document(lib_id, uuid4())
+
+
+def test_create_document_generates_embeddings_for_nested_chunks(
+    repo_mock, embeddings_client_mock
+):
+    """
+    Verify that creating a document with chunks triggers batch embedding generation.
+    """
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    fake_lib = FakeLibrary(uid=lib_id, documents={}, indices={}, index_metadata={})
+    repo_mock.get_by_id.return_value = fake_lib
+
+    # Configure the mock to return embeddings for our batch
+    # We are sending 2 chunks, so we expect 2 vectors back
+    embeddings_client_mock.get_embeddings.return_value = [[0.1, 0.1], [0.2, 0.2]]
+
+    doc_uid = uuid4()
+    doc_schema = FakeSchema(
+        {
+            "uid": doc_uid,
+            "title": "My Doc",
+            "chunks": [
+                FakeSchema({"text": "chunk A"}),
+                FakeSchema({"text": "chunk B"}),
+            ],
+        }
+    )
+
+    created_doc = svc.create_document(lib_id, doc_schema)
+
+    # 1. Verify client call
+    # It should call get_embeddings ONCE with a list of BOTH texts
+    embeddings_client_mock.get_embeddings.assert_called_once_with(
+        ["chunk A", "chunk B"]
+    )
+
+    # 2. Verify embeddings were assigned
+    # Note: created_doc.chunks is a dict {uid: Chunk}
+    chunks_list = list(created_doc.chunks.values())
+    assert len(chunks_list) == 2
+
+    # Sort by text to ensure we check the right ones (since dict order can vary)
+    chunks_list.sort(key=lambda c: c.text)
+
+    assert chunks_list[0].text == "chunk A"
+    assert chunks_list[0].embedding == [0.1, 0.1]
+
+    assert chunks_list[1].text == "chunk B"
+    assert chunks_list[1].embedding == [0.2, 0.2]
+
+
+def test_create_document_updates_indices_for_nested_chunks(
+    repo_mock, embeddings_client_mock
+):
+    """
+    Verify that creating a document also updates the library's indices.
+    """
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+
+    # Setup a library with an AVL index
+    # We use a real AvlIndex here to verify the insertion logic
+    from src.core.indexing.avl_index import AvlIndex
+
+    avl_index = AvlIndex()
+    fake_lib = FakeLibrary(
+        uid=lib_id,
+        documents={},
+        indices={"my-avl": avl_index},
+        index_metadata={"my-avl": Mock(vector_count=0)},  # Mock metadata
+    )
+    repo_mock.get_by_id.return_value = fake_lib
+    embeddings_client_mock.get_embeddings.return_value = [[0.1], [0.2]]
+
+    doc_schema = FakeSchema(
+        {"chunks": [FakeSchema({"text": "A"}), FakeSchema({"text": "B"})]}
+    )
+
+    svc.create_document(lib_id, doc_schema)
+
+    # Verify the index actually received the vectors
+    assert avl_index.vector_count == 2
 
 
 # -------------------------

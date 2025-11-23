@@ -221,22 +221,16 @@ def test_search_fails_if_index_not_created(
     assert "not ready for search" in response.json()["detail"].lower()
 
 
-def test_search_on_library_with_no_embeddings_returns_empty(
-    client,
-    create_library_via_api,
-    create_document_via_api,
-    create_chunk_via_api,
-    create_index_via_api,
+def test_search_on_empty_library_returns_empty_results(
+    client, create_library_via_api, create_index_via_api
 ):
     """
-    QA Goal: Test graceful handling of a library with content but no searchable vectors.
+    QA Goal: Verify search works gracefully on a library with no data.
     """
     lib = create_library_via_api()
-    doc = create_document_via_api(library_id=lib["id"])
-    create_chunk_via_api(
-        lib["id"], doc["id"], {"text": "text but no embedding", "embedding": None}
-    )
-    index_name = "empty-vector-index"
+
+    # Create an index on an empty library
+    index_name = "empty-index"
     create_index_via_api(lib["id"], index_name, {"index_type": "avl"})
 
     status_res = client.get(f"/libraries/{lib['id']}/index/{index_name}")
@@ -246,6 +240,7 @@ def test_search_on_library_with_no_embeddings_returns_empty(
     search_res = client.post(
         f"/libraries/{lib['id']}/search/{index_name}", json=search_payload
     )
+
     assert search_res.status_code == status.HTTP_200_OK
     assert search_res.json() == []
 

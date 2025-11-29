@@ -138,3 +138,90 @@ def test_writer_blocks_writer():
 
     # If locks work, result is 10. If race condition, result < 10.
     assert shared_resource == 10
+
+
+def test_writer_priority_over_new_readers():
+    """
+    Verify that a WAITING writer blocks new readers (Anti-Starvation).
+
+    Scenario:
+    1. Reader 1 holds the lock.
+    2. Writer attempts to acquire lock and blocks (increments _writers_waiting).
+    3. Reader 2 attempts to acquire lock.
+
+    Expected: Reader 2 must NOT acquire the lock until after the Writer has finished.
+    """
+    lock = RWLock()
+    log = []
+
+    # Synchronization events
+    r1_acquired = threading.Event()
+    writer_queued = threading.Event()
+
+    def reader_1_task():
+        with lock.read_lock():
+            r1_acquired.set()
+            time.sleep(0.2)  # Hold lock to force writer to wait
+            log.append("R1_done")
+
+    def writer_task():
+        r1_acquired.wait()  # Ensure R1 has the lock
+        writer_queued.set()  # Signal that we are about to request lock
+
+        # This should block until R1 releases
+        # Crucially, simply entering this context manager increments _writers_waiting
+        with lock.write_lock():
+            log.append("Writer_work")
+
+    def reader_2_task():
+        writer_queued.wait()
+        # Give the writer a tiny moment to execute the 'waiting' increment logic
+        time.sleep(0.05)
+
+        # If priority logic is working, this blocks.
+        # If broken, R2 enters immediately because R1 is still holding read lock.
+        with lock.read_lock():
+            log.append("R2_work")
+
+    t_r1 = threading.Thread(target=reader_1_task)
+    t_w = threading.Thread(target=writer_task)
+    t_r2 = threading.Thread(target=reader_2_task)
+
+    t_r1.start()
+    t_w.start()
+    t_r2.start()
+
+    t_r1.join()
+    t_w.join()
+    t_r2.join()
+
+    # If R2 ran before Writer, starvation protection failed.
+    # Correct order: R1 finishes -> Writer runs -> R2 runs
+    assert log == ["R1_done", "Writer_work", "R2_work"]
+
+
+def test_internal_state_integrity():
+    """
+    White-box testing to ensure internal counters are reset correctly
+    even after heavy contention.
+    """
+    lock = RWLock()
+
+    def mixed_work():
+        with lock.read_lock():
+            time.sleep(0.001)
+        with lock.write_lock():
+            time.sleep(0.001)
+
+    threads = [threading.Thread(target=mixed_work) for _ in range(20)]
+
+    for t in threads:
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    # Verify internal state is clean
+    assert lock._num_readers == 0
+    assert lock._writer_active is False
+    assert lock._writers_waiting == 0

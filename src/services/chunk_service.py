@@ -44,14 +44,16 @@ class ChunkService:
     def _update_indices_on_add_update(self, library: Library, chunk: Chunk):
         """Updates all indices of a library after a chunk addition/update."""
         for index_name, index in library.indices.items():
-            if isinstance(index, (AvlIndex, LshIndex)):
+            if isinstance(index, LshIndex):
+                index.delete(chunk.uid)  # Remove old entry if exists
                 index.insert(chunk)
 
-                # Also update the corresponding metadata object.
-                if index_name in library.index_metadata:
-                    library.index_metadata[index_name].vector_count = index.vector_count
-            else:
-                pass
+            elif isinstance(index, AvlIndex):
+                index.insert(chunk)
+
+            # Also update the corresponding metadata object.
+            if index_name in library.index_metadata:
+                library.index_metadata[index_name].vector_count = index.vector_count
 
     def _update_indices_on_delete(self, library: Library, chunk_id: UUID):
         """Updates all indices of a library after a chunk deletion."""
@@ -105,17 +107,19 @@ class ChunkService:
 
         update_data = chunk_update.model_dump(exclude_unset=True)
 
+        embedding_changed = False
         if chunk_update.text is not None:
             new_embedding = self.embeddings_client.get_embeddings([chunk_update.text])[
                 0
             ]
             update_data["embedding"] = new_embedding
+            embedding_changed = True
 
         updated_chunk = chunk.model_copy(update=update_data)
         document.chunks[chunk_id] = updated_chunk
 
         # Update indices only if text was changed (and thus embedding)
-        if chunk_update.text is not None:
+        if embedding_changed:
             self._update_indices_on_add_update(library, updated_chunk)
 
         self.repository.update(library)

@@ -30,5 +30,5 @@ class ILibraryRepository(ABC):
         pass
 
     @abstractmethod
-    def clear(self) -> None:  # Helper for testing
+    def clear(self) -> None:
         pass

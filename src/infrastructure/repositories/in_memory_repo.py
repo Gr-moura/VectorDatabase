@@ -16,16 +16,23 @@ class InMemoryLibraryRepository(ILibraryRepository):
     # --- WRITERS (Exclusive Access) ---
 
     def add(self, library: Library) -> None:
+        lib_copy = library.model_copy(deep=True)
+
         with self._lock.write_lock():
-            if library.uid in self._data:
-                return
-            self._data[library.uid] = library
+            if lib_copy.uid in self._data:
+                raise ValueError(f"Library with id {lib_copy.uid} already exists.")
+
+            # Store the COPY, not the reference
+            self._data[lib_copy.uid] = lib_copy
 
     def update(self, library: Library) -> None:
+        lib_copy = library.model_copy(deep=True)
+
         with self._lock.write_lock():
-            if library.uid not in self._data:
-                raise LibraryNotFound(f"Library with id {library.uid} not found")
-            self._data[library.uid] = library
+            if lib_copy.uid not in self._data:
+                raise LibraryNotFound(f"Library with id {lib_copy.uid} not found")
+
+            self._data[lib_copy.uid] = lib_copy
 
     def delete(self, library_id: UUID) -> None:
         with self._lock.write_lock():

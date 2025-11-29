@@ -4,6 +4,7 @@ from uuid import UUID
 from typing import List
 from src.core.models import Document, Chunk, Library
 from src.core.indexing.avl_index import AvlIndex
+from src.core.indexing.lsh_index import LshIndex
 from src.api.schemas import DocumentCreate, DocumentUpdate
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.infrastructure.embeddings.base_client import IEmbeddingsClient
@@ -57,12 +58,11 @@ class DocumentService:
             return
 
         for index_name, index in library.indices.items():
-            if isinstance(index, AvlIndex):
+            if isinstance(index, (AvlIndex, LshIndex)):
                 index.insert(chunk)
+
                 if index_name in library.index_metadata:
                     library.index_metadata[index_name].vector_count = index.vector_count
-            else:
-                pass
 
     def get_document(self, library_id: UUID, doc_id: UUID) -> Document:
         library = self.repository.get_by_id(library_id)
@@ -100,6 +100,18 @@ class DocumentService:
             raise DocumentNotFound(
                 f"Document {doc_id} not found in library {library_id}"
             )
+
+        document = library.documents[doc_id]
+
+        if document.chunks:
+            for chunk_id in document.chunks:
+                for index in library.indices.values():
+                    if isinstance(index, (AvlIndex, LshIndex)):
+                        index.delete(chunk_id)
+
+        for index_name, index in library.indices.items():
+            if index_name in library.index_metadata:
+                library.index_metadata[index_name].vector_count = index.vector_count
 
         del library.documents[doc_id]
         self.repository.update(library)

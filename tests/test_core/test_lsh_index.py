@@ -6,6 +6,11 @@ from uuid import uuid4
 from src.core.models import Chunk
 from src.core.indexing.lsh_index import LshIndex
 
+# --- Globals ---
+TEST_SEED = 42
+NUM_BITS = 8
+NUM_TABLES = 5
+
 # --- Fixtures ---
 
 
@@ -20,17 +25,17 @@ def chunk_factory():
 @pytest.fixture
 def lsh_index():
     # 8 bits, 5 tables provides decent recall for testing small datasets
-    return LshIndex(num_bits=8, num_tables=5)
+    return LshIndex(num_bits=NUM_BITS, num_tables=NUM_TABLES, seed=TEST_SEED)
 
 
-# --- Testes de Unidade ---
+# --- Unit tests ---
 
 
 def test_initialization(lsh_index):
     assert lsh_index.vector_count == 0
-    assert lsh_index._num_bits == 8
-    assert lsh_index._num_tables == 5
-    # Planes shouldn't be initialized until first insert/build
+    assert lsh_index._num_bits == NUM_BITS
+    assert lsh_index._num_tables == NUM_TABLES
+    assert isinstance(lsh_index._rng, np.random.Generator)
     assert len(lsh_index._planes) == 0
 
 
@@ -98,7 +103,7 @@ def test_build_bulk(lsh_index, chunk_factory):
     assert len(lsh_index._planes) == 5
 
 
-# --- Teste de Acurácia (Recall) ---
+# --- Accuracy tests ---
 
 
 def test_search_accuracy_simple(lsh_index, chunk_factory):
@@ -130,7 +135,6 @@ def test_search_accuracy_dense(lsh_index, chunk_factory):
     Test LSH in a denser cluster. This validates probability.
     We use a fixed seed inside LSH class, so this should be deterministic.
     """
-    np.random.seed(42)  # Seed for data generation
 
     # 1. Target vector
     target_vec = np.array([1.0, 0.0, 0.0])

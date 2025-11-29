@@ -32,6 +32,8 @@ class IndexFactory:
             return index_class(metric=metric)
 
         elif index_type == IndexType.LSH:
-            return index_class(num_bits=num_bits, num_tables=num_tables)
+            return index_class(
+                num_bits=num_bits, num_tables=num_tables, seed=kwargs.get("seed")
+            )
 
         return index_class()

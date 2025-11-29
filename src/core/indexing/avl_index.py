@@ -235,10 +235,11 @@ class AvlIndex(VectorIndex):
         elif key > node.key:
             node.right = self._delete_node(node.right, key)
         else:  # Node to be deleted found
-            self._vector_count -= 1  # Decrement the counter
             if node.left is None:
+                self._vector_count -= 1
                 return node.right
             elif node.right is None:
+                self._vector_count -= 1
                 return node.left
 
             # Node with two children: get the in-order successor (smallest in the right subtree)
@@ -246,6 +247,7 @@ class AvlIndex(VectorIndex):
             node.key = temp.key
             node.chunk = temp.chunk
             node.vector = temp.vector
+
             node.right = self._delete_node(node.right, temp.key)
 
         if not node:

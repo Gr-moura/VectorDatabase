@@ -16,15 +16,20 @@ class LshIndex(VectorIndex):
     Best for Cosine Similarity. Supports dynamic updates.
     """
 
-    def __init__(self, num_bits: int = 8, num_tables: int = 3):
+    def __init__(
+        self, num_bits: int = 8, num_tables: int = 3, seed: Optional[int] = None
+    ):
         """
         Args:
-            num_bits: Number of hyperplanes per table. Higher = fewer collisions (precision), lower recall.
-            num_tables: Number of independent hash tables. Higher = higher recall, more memory.
+                        num_bits: Number of hyperplanes per table. Higher = fewer collisions (precision), lower recall.
+                        num_tables: Number of independent hash tables. Higher = higher recall, more memory.
+                        seed: Optional seed for reproducibility. If None, uses entropy from OS.
         """
         self._num_bits = num_bits
         self._num_tables = num_tables
         self._metric = Metric.COSINE
+
+        self._rng = np.random.default_rng(seed)
 
         # List of hyperplanes (random normal vectors) for each table
         # Shape per table: (dimension, num_bits)
@@ -54,10 +59,10 @@ class LshIndex(VectorIndex):
         """Initializes random hyperplanes if not already done."""
         if not self._planes:
             self._dimension = dimension
-            np.random.seed(42)  # For reproducibility
+
             for _ in range(self._num_tables):
                 # Create random vectors from normal distribution
-                planes = np.random.randn(dimension, self._num_bits)
+                planes = self._rng.standard_normal((dimension, self._num_bits))
                 self._planes.append(planes)
                 self._tables.append({})
 
@@ -75,10 +80,12 @@ class LshIndex(VectorIndex):
 
     def build(self, chunks: List[Chunk]):
         """Bulk build."""
+        # 1. Clear existing data
         self._chunks.clear()
         self._vectors.clear()
         self._planes.clear()
         self._tables.clear()
+        self._dimension = 0
 
         valid_chunks = [c for c in chunks if c.embedding]
         if not valid_chunks:

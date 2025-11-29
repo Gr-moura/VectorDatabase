@@ -6,6 +6,7 @@ class IndexType(str, Enum):
     """Enumeration for the available index types."""
 
     AVL = "avl"
+    LSH = "lsh"
 
 
 class Metric(str, Enum):

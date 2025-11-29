@@ -8,6 +8,7 @@ from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.exceptions import DocumentNotFound
 from src.core.exceptions import ChunkNotFound
 from src.core.indexing.avl_index import AvlIndex
+from src.core.indexing.lsh_index import LshIndex
 from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 
 
@@ -43,30 +44,26 @@ class ChunkService:
     def _update_indices_on_add_update(self, library: Library, chunk: Chunk):
         """Updates all indices of a library after a chunk addition/update."""
         for index_name, index in library.indices.items():
-            if isinstance(index, AvlIndex):
+            if isinstance(index, (AvlIndex, LshIndex)):
                 index.insert(chunk)
 
                 # Also update the corresponding metadata object.
                 if index_name in library.index_metadata:
                     library.index_metadata[index_name].vector_count = index.vector_count
-
-                print(f"AvlIndex '{index_name}' updated for chunk {chunk.uid}.")
             else:
-                pass  # Handle other index types as needed
+                pass
 
     def _update_indices_on_delete(self, library: Library, chunk_id: UUID):
         """Updates all indices of a library after a chunk deletion."""
         for index_name, index in list(library.indices.items()):
-            if isinstance(index, AvlIndex):
+            if isinstance(index, (AvlIndex, LshIndex)):
                 index.delete(chunk_id)
 
                 # Also update the corresponding metadata object.
                 if index_name in library.index_metadata:
                     library.index_metadata[index_name].vector_count = index.vector_count
-
-                print(f"Chunk {chunk_id} deleted from AvlIndex '{index_name}'.")
             else:
-                pass  # Handle other index types as needed
+                pass
 
     def create_chunk(
         self, library_id: UUID, doc_id: UUID, chunk_create: ChunkCreate

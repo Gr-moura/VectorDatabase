@@ -1,13 +1,13 @@
 # src/core/indexing/avl_index.py
 
 from uuid import UUID
-from typing import List, Tuple, Any, Optional
+from typing import List, Tuple, Optional
 import numpy as np
+import heapq
 
 from src.core.models import Chunk
 from .base_index import VectorIndex
 from .enums import IndexType, Metric
-from src.core.exceptions import IndexNotReady
 
 
 class AvlNode:
@@ -33,7 +33,7 @@ class AvlIndex(VectorIndex):
     def __init__(self, metric: Metric = Metric.COSINE):
         self._metric = metric
         self.root: Optional[AvlNode] = None
-        self._vector_count = 0  # Keep track of the count
+        self._vector_count = 0
 
     @property
     def index_type(self) -> IndexType:
@@ -73,40 +73,87 @@ class AvlIndex(VectorIndex):
             self.root = self._delete_node(self.root, chunk_id)
 
     def search(self, query_embedding: List[float], k: int) -> List[Tuple[Chunk, float]]:
-        """Performs an exhaustive search over all nodes in the tree."""
+        """
+        Performs an exhaustive search over all nodes in the tree using a Heap.
+
+        This implementation uses a Priority Queue (heapq) to maintain only the
+        top-k candidates during traversal. This is memory efficient O(k) but
+        less CPU efficient than fully vectorized NumPy operations for large datasets.
+        """
         if self.root is None:
             return []
 
-        # 1. Traverse the tree to collect all chunks and vectors
-        candidates = []
-        self._in_order_traversal(self.root, candidates)
-
-        if not candidates:
-            return []
-
-        # 2. Perform brute-force search on the collected candidates
-        chunks, vectors = zip(*candidates)
-        matrix = np.array(vectors)
         query_vector = np.array(query_embedding, dtype=np.float32)
 
+        # Pre-process query vector based on metric
         if self.metric == Metric.COSINE:
-            if np.linalg.norm(query_vector) > 0:
-                query_vector /= np.linalg.norm(query_vector)
-            scores = np.dot(matrix, query_vector)
-            top_k_indices = np.argsort(scores)[-k:][::-1]
+            norm = np.linalg.norm(query_vector)
+            if norm > 0:
+                query_vector /= norm
+
+        # Min-heap to store tuples of (score_priority, chunk).
+        # Python's heapq is a min-heap (pops the smallest value).
+        candidates_heap = []
+
+        def _visit_node(node: Optional[AvlNode]):
+            if not node:
+                return
+
+            # 1. Calculate score for the current node
+            vector = node.vector
+
+            if self.metric == Metric.COSINE:
+                # Cosine Similarity (Dot product of normalized vectors).
+                # Higher is better.
+                # We want to keep the K largest values.
+                # If we push the score directly, heappop will remove the SMALLEST score.
+                # This leaves us with the largest scores in the heap.
+                score = float(np.dot(vector, query_vector))
+                heapq.heappush(candidates_heap, (score, node.chunk))
+
+            elif self.metric == Metric.EUCLIDEAN:
+                # Euclidean Distance.
+                # Lower is better.
+                # We want to keep the K smallest values.
+                # We need to simulate a Max-Heap to pop the LARGEST distance (the worst candidate).
+                # We store -distance. The "smallest" number is the one with largest magnitude (e.g. -10 < -2).
+                # heappop will remove -10 (distance 10), keeping -2 (distance 2).
+                dist = float(np.linalg.norm(vector - query_vector))
+                heapq.heappush(candidates_heap, (-dist, node.chunk))
+
+            # 2. Maintain heap size
+            if len(candidates_heap) > k:
+                heapq.heappop(candidates_heap)
+
+            # 3. Continue traversal
+            _visit_node(node.left)
+            _visit_node(node.right)
+
+        # Start the recursive traversal
+        _visit_node(self.root)
+
+        # 4. Sort and Format Results
+        results = []
+
+        if self.metric == Metric.COSINE:
+            # The heap contains the top-k, but unsorted.
+            # Sort descending by score (highest similarity first).
+            sorted_candidates = sorted(
+                candidates_heap, key=lambda x: x[0], reverse=True
+            )
+            for score, chunk in sorted_candidates:
+                results.append((chunk, score))
 
         elif self.metric == Metric.EUCLIDEAN:
-            distances = np.sum((matrix - query_vector) ** 2, axis=1)
-            top_k_indices = np.argsort(distances)[:k]
-            scores = np.sqrt(distances[top_k_indices])
-        else:
-            raise ValueError(f"Unknown metric: {self.metric}")
-
-        # 3. Format and return results
-        results = []
-        for i in top_k_indices:
-            score = scores[i] if self.metric == Metric.EUCLIDEAN else scores[i]
-            results.append((chunks[i], float(score)))
+            # The heap contains (-distance, chunk).
+            # Sort descending by the negative distance (e.g. -2, -5, -10).
+            # This corresponds to distances 2, 5, 10.
+            sorted_candidates = sorted(
+                candidates_heap, key=lambda x: x[0], reverse=True
+            )
+            for neg_dist, chunk in sorted_candidates:
+                # Convert back to positive distance
+                results.append((chunk, -neg_dist))
 
         return results
 

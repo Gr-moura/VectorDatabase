@@ -23,11 +23,23 @@ class IndexCreate(BaseModel):
     # This is the user's input, so we only include what they can control.
     index_type: IndexType = Field(
         default=IndexType.AVL,
-        description="The type of index to build ('avl' for dynamic exact search).",
+        description="The type of index to build ('avl' for dynamic exact search, 'lsh' for approximate search).",
     )
+
     metric: Metric = Field(
         default=Metric.COSINE,
         description="Distance metric for the index (cosine or euclidean).",
+    )
+
+    num_bits: int = Field(
+        default=8,
+        gt=0,
+        description="Bits for LSH. More bits = higher precision, lower recall.",
+    )
+    num_tables: int = Field(
+        default=3,
+        gt=0,
+        description="Tables for LSH. More tables = higher recall, more memory.",
     )
 
 

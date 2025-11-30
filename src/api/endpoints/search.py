@@ -26,7 +26,7 @@ def create_library_index(
     """
     Creates (or recreates) a named vector index for a library.
 
-    - **index_type**: 'avl' is currently supported.
+    - **index_type**: 'avl' and 'lsh' are currently supported.
     - **metric**: 'cosine' (default) or 'euclidean'.
     """
     service.create_index(library_id, index_name, index_config)

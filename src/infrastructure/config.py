@@ -1,16 +1,16 @@
 # src/infrastructure/config.py
 
 import os
-from dotenv import load_dotenv
 
-# This function will search for a .env file in the project root
-# and load its variables into the environment.
-load_dotenv()
+try:
+    from dotenv import load_dotenv
 
-# We can now access the variables using os.getenv()
+    load_dotenv()
+except ImportError:
+    pass
+
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
-if COHERE_API_KEY is None:
-    print(
-        "Warning: COHERE_API_KEY environment variable not found. Real embeddings client will fail."
-    )
+# Fail Fast: Prevent the app from starting without critical config
+if not COHERE_API_KEY:
+    raise ValueError("FATAL: COHERE_API_KEY environment variable is not set.")

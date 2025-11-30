@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from src.services.search_service import SearchService
-from src.core.exceptions import IndexNotFound, IndexNotReady
+from src.core.exceptions import IndexNotFound, IndexNotReady, VectorDimensionMismatch
 from src.api.schemas import IndexCreate
 from src.core.indexing.index_factory import IndexType, Metric
 from fastapi import status
@@ -238,12 +238,12 @@ def test_search_chunks_fails_gracefully_with_wrong_vector_dimension(
     search_service, mock_repo
 ):
     """
-    Unit Test: Verifies that the service captures ValueError raised by the index
-    (simulating a numpy dimension mismatch) and propagates it correctly.
+    Unit Test: Verifies that the service captures NumPy errors raised by the index
+    and wraps them in a semantic VectorDimensionMismatch exception.
     """
     lib_id = uuid4()
 
-    # 1. Setup: Mock the index to raise ValueError when search() is called
+    # 1. Setup: Mock the index to raise ValueError (simulating NumPy mismatch)
     mock_index = Mock()
     mock_index.search.side_effect = ValueError("shapes (3,) and (2,) not aligned")
 
@@ -253,11 +253,11 @@ def test_search_chunks_fails_gracefully_with_wrong_vector_dimension(
     mock_repo.get_by_id.return_value = library
 
     # 2. Action & Assert
-    with pytest.raises(ValueError) as exc_info:
-        search_service.search_chunks(
-            lib_id, "idx", k=1, query_embedding=[0.1, 0.2]  # Wrong dimension vector
-        )
+    # Expect the specific custom exception, not a generic ValueError
+    with pytest.raises(VectorDimensionMismatch) as exc_info:
+        search_service.search_chunks(lib_id, "idx", k=1, query_embedding=[0.1, 0.2])
 
-    # 3. Verify the exception message wraps the original error
-    assert "Vector search failed" in str(exc_info.value)
-    assert "shapes (3,) and (2,) not aligned" in str(exc_info.value)
+    # 3. Verify the exception message
+    error_msg = str(exc_info.value)
+    assert "Vector dimension mismatch" in error_msg
+    assert "shapes (3,) and (2,) not aligned" in error_msg

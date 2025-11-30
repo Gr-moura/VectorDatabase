@@ -2,6 +2,8 @@ import cohere
 from typing import List, Optional
 from .base_client import IEmbeddingsClient
 
+# Removed internal config import in favor of top-level or injection
+
 
 class CohereClient(IEmbeddingsClient):
     # Batch limit for Cohere API
@@ -9,7 +11,7 @@ class CohereClient(IEmbeddingsClient):
 
     def __init__(
         self,
-        api_key: str,  # Dependency Injection: Passe a chave aqui, não importe dentro
+        api_key: str,  # Dependency Injection: Pass key here; do not import internally
         model_name: str = "embed-english-v3.0",
     ):
         self._api_key = api_key
@@ -25,7 +27,7 @@ class CohereClient(IEmbeddingsClient):
     def get_embeddings(
         self,
         texts: List[str],
-        input_type: str = "search_document",  # Default para indexação, override para busca
+        input_type: str = "search_document",  # Default for indexing; override for search
     ) -> List[List[float]]:
         if not texts:
             return []
@@ -41,7 +43,7 @@ class CohereClient(IEmbeddingsClient):
                 )
                 all_embeddings.extend(response.embeddings)
             except Exception as e:
-                # Logar erro e re-levantar ou tratar conforme política de resiliência
+                # Log error and re-raise or handle per resiliency policy
                 raise ConnectionError(
                     f"Cohere API failed on batch {i}: {str(e)}"
                 ) from e

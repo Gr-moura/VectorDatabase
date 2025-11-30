@@ -10,6 +10,7 @@ from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.indexing.index_factory import IndexFactory, IndexType
 from src.core.models import Chunk, Library, IndexMetadata, IndexConfig
 from src.core.exceptions import IndexNotReady, IndexNotFound
+from src.core.exceptions import VectorDimensionMismatch
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -143,9 +144,10 @@ class SearchService:
         try:
             raw_results = index.search(query_vector, k)
         except ValueError as e:
-            # Re-raise as a clean ValueError that API can handle as 400
-            raise ValueError(f"Vector search failed (dimension mismatch?): {str(e)}")
-
+            raise VectorDimensionMismatch(
+                f"Vector dimension mismatch. Index expects consistent dimensions, "
+                f"but got an incompatible query vector. Underlying error: {str(e)}"
+            )
         validated_results: List[SearchResult] = []
 
         # 5. Result Hydration & Consistency Check

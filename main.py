@@ -1,4 +1,4 @@
-# vector_db_project/main.py
+# main.py
 
 import uvicorn
 from fastapi import FastAPI, Request, status
@@ -11,6 +11,7 @@ from src.core.exceptions import (
     ChunkNotFound,
     IndexNotReady,
     IndexNotFound,
+    VectorDimensionMismatch,
 )
 
 # Create the main FastAPI application
@@ -23,6 +24,18 @@ app = FastAPI(
 # ============================================================================
 # EXCEPTION HANDLERS
 # ============================================================================
+
+
+@app.exception_handler(VectorDimensionMismatch)
+async def vector_dimension_error_handler(
+    request: Request, exc: VectorDimensionMismatch
+):
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "detail": str(exc),
+        },
+    )
 
 
 @app.exception_handler(IndexNotReady)

@@ -31,7 +31,7 @@ class IndexNotFound(Exception):
     pass
 
 
-class DimensionMismatch(Exception):
+class VectorDimensionMismatch(Exception):
     """Raised when there is a dimension mismatch during search operations."""
 
     pass

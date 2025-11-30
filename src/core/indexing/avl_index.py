@@ -109,7 +109,9 @@ class AvlIndex(VectorIndex):
                 # If we push the score directly, heappop will remove the SMALLEST score.
                 # This leaves us with the largest scores in the heap.
                 score = float(np.dot(vector, query_vector))
-                heapq.heappush(candidates_heap, (score, node.chunk))
+
+                # chunk.uid as tiebreaker
+                heapq.heappush(candidates_heap, (score, node.chunk.uid, node.chunk))
 
             elif self.metric == Metric.EUCLIDEAN:
                 # Euclidean Distance.
@@ -119,7 +121,7 @@ class AvlIndex(VectorIndex):
                 # We store -distance. The "smallest" number is the one with largest magnitude (e.g. -10 < -2).
                 # heappop will remove -10 (distance 10), keeping -2 (distance 2).
                 dist = float(np.linalg.norm(vector - query_vector))
-                heapq.heappush(candidates_heap, (-dist, node.chunk))
+                heapq.heappush(candidates_heap, (-dist, node.chunk.uid, node.chunk))
 
             # 2. Maintain heap size
             if len(candidates_heap) > k:
@@ -136,23 +138,17 @@ class AvlIndex(VectorIndex):
         results = []
 
         if self.metric == Metric.COSINE:
-            # The heap contains the top-k, but unsorted.
-            # Sort descending by score (highest similarity first).
             sorted_candidates = sorted(
                 candidates_heap, key=lambda x: x[0], reverse=True
             )
-            for score, chunk in sorted_candidates:
+            for score, _, chunk in sorted_candidates:
                 results.append((chunk, score))
 
         elif self.metric == Metric.EUCLIDEAN:
-            # The heap contains (-distance, chunk).
-            # Sort descending by the negative distance (e.g. -2, -5, -10).
-            # This corresponds to distances 2, 5, 10.
             sorted_candidates = sorted(
                 candidates_heap, key=lambda x: x[0], reverse=True
             )
-            for neg_dist, chunk in sorted_candidates:
-                # Convert back to positive distance
+            for neg_dist, _, chunk in sorted_candidates:
                 results.append((chunk, -neg_dist))
 
         return results

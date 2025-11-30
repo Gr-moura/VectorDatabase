@@ -6,7 +6,6 @@ from contextlib import contextmanager
 
 class RWLock:
     """
-    A simple Reader-Writer Lock implementation using Python's threading primitives.
     Allows multiple concurrent readers, but only one exclusive writer.
     Writer priority is not strictly enforced here to keep it simple, but
     writers will block new readers.
@@ -36,7 +35,7 @@ class RWLock:
         finally:
             with self._lock:
                 self._num_readers -= 1
-                # If I was the last reader, notify waiting writers
+                # If it was the last reader, notify waiting writers
                 if self._num_readers == 0:
                     self._readers_ok.notify_all()
 
@@ -55,6 +54,7 @@ class RWLock:
 
             finally:
                 self._writers_waiting -= 1
+                self._writers_ok.notify_all()
 
             self._writer_active = True
 
@@ -64,3 +64,4 @@ class RWLock:
             with self._lock:
                 self._writer_active = False
                 self._writers_ok.notify_all()
+                self._readers_ok.notify_all()

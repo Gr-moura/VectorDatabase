@@ -5,6 +5,7 @@ from uuid import UUID
 from typing import List, Dict, Optional
 
 from src.api.schemas import SearchResult, IndexCreate, ChunkResponse
+from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.indexing.index_factory import IndexFactory, IndexType
 from src.core.models import Chunk, Library, IndexMetadata, IndexConfig
@@ -15,8 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class SearchService:
-    def __init__(self, repository: ILibraryRepository):
+    def __init__(
+        self, repository: ILibraryRepository, embeddings_client: IEmbeddingsClient
+    ):
         self.repository = repository
+        self.embeddings_client = embeddings_client
 
     def create_index(self, library_id: UUID, index_name: str, api_config: IndexCreate):
         """Creates an index and attaches it to the Library object in the repository."""
@@ -93,11 +97,39 @@ class SearchService:
         logger.info(f"Index '{index_name}' deleted from library {library_id}.")
 
     def search_chunks(
-        self, library_id: UUID, index_name: str, query_embedding: List[float], k: int
+        self,
+        library_id: UUID,
+        index_name: str,
+        k: int,
+        query_embedding: Optional[List[float]] = None,
+        query_text: Optional[str] = None,
     ) -> List[SearchResult]:
         """
         Performs a search using the index attached to the library.
+        Handles embedding generation if raw text is provided.
         """
+        # 1. Validation
+        if not query_text and not query_embedding:
+            raise ValueError(
+                "Either 'query_text' or 'query_embedding' must be provided."
+            )
+
+        # 2. Resolve Query Vector
+        query_vector = query_embedding
+
+        if query_text:
+            embeddings = self.embeddings_client.get_embeddings(
+                texts=[query_text], input_type="search_query"
+            )
+
+            if not embeddings:
+                raise ValueError(
+                    "Failed to generate embedding for the provided query text."
+                )
+
+            query_vector = embeddings[0]
+
+        # 3. Retrieve Library and Index
         library = self.repository.get_by_id(library_id)
         index = library.indices.get(index_name)
 
@@ -106,9 +138,17 @@ class SearchService:
                 f"Index '{index_name}' is not ready for search. It may need to be rebuilt."
             )
 
-        raw_results = index.search(query_embedding, k)
+        # 4. Perform Search
+        # Pass the resolved query_vector (not the raw optional argument)
+        try:
+            raw_results = index.search(query_vector, k)
+        except ValueError as e:
+            # Re-raise as a clean ValueError that API can handle as 400
+            raise ValueError(f"Vector search failed (dimension mismatch?): {str(e)}")
+
         validated_results: List[SearchResult] = []
 
+        # 5. Result Hydration & Consistency Check
         for index_chunk, score in raw_results:
             found_chunk_response: Optional[ChunkResponse] = None
 

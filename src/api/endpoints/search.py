@@ -1,4 +1,5 @@
 # src/api/endpoints/search.py
+
 from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, status, Response
@@ -24,9 +25,14 @@ def create_library_index(
 ):
     """
     Creates (or recreates) a named vector index for a library.
+
+    - **index_type**: 'avl' is currently supported.
+    - **metric**: 'cosine' (default) or 'euclidean'.
     """
     service.create_index(library_id, index_name, index_config)
+
     response.headers["Location"] = f"/libraries/{library_id}/index/{index_name}"
+
     return service.get_index_status(library_id, index_name)
 
 
@@ -59,7 +65,7 @@ def delete_library_index(
 
 
 # ============================================================================
-# General paths
+# General paths (without {index_name}) come after specific ones.
 # ============================================================================
 
 
@@ -94,12 +100,13 @@ def search_in_library(
 ):
     """
     Performs a k-NN vector search using a specific named index.
+    You can provide either 'query_embedding' (raw vector) or 'query_text' (to be embedded by the backend).
     """
-
     results = service.search_chunks(
         library_id=library_id,
         index_name=index_name,
         query_embedding=query.query_embedding,
         k=query.k,
+        query_text=query.query_text,
     )
     return results

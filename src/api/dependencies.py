@@ -52,5 +52,9 @@ def get_chunk_service(
     )
 
 
-def get_search_service() -> SearchService:
-    return SearchService(repository=library_repository)
+def get_search_service(
+    embeddings_client: IEmbeddingsClient = Depends(get_embeddings_client),
+) -> SearchService:
+    return SearchService(
+        repository=library_repository, embeddings_client=embeddings_client
+    )

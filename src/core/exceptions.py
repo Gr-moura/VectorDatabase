@@ -29,3 +29,9 @@ class IndexNotFound(Exception):
     """Raised when a specified index is not found in the library."""
 
     pass
+
+
+class DimensionMismatch(Exception):
+    """Raised when there is a dimension mismatch during search operations."""
+
+    pass

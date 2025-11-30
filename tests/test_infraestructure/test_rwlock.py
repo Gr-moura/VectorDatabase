@@ -2,7 +2,44 @@
 
 import threading
 import time
+import pytest
 from src.infrastructure.concurrency.rwlock import RWLock
+
+# ============================================================================
+# Helpers for Robustness Testing
+# ============================================================================
+
+
+class SabotagedWaitError(Exception):
+    """Custom exception to simulate a crash inside wait()."""
+
+    pass
+
+
+class SabotagedCondition:
+    """
+    A Proxy for threading.Condition that raises an exception
+    when wait() is called, simulating a thread crash during lock acquisition.
+    """
+
+    def __init__(self, real_condition):
+        self._real = real_condition
+
+    def wait(self):
+        # Simulate a crash exactly when the writer is blocked
+        raise SabotagedWaitError("Writer crashed while waiting!")
+
+    def notify_all(self):
+        self._real.notify_all()
+
+    def __getattr__(self, name):
+        # Delegate other methods (acquire, release, etc.) to the real condition
+        return getattr(self._real, name)
+
+
+# ============================================================================
+# Tests
+# ============================================================================
 
 
 def test_single_thread_read_write():
@@ -41,9 +78,6 @@ def test_multiple_readers_concurrently():
     # Give threads a moment to start and acquire lock
     time.sleep(0.05)
 
-    # Crucial assertion: All 5 threads should be inside the critical section
-    # at the same time because readers don't block readers.
-    # Note: This relies on timing, so it's slightly brittle, but standard for lock testing.
     with lock._lock:  # Peek at internal state safely
         active_readers = lock._num_readers
 
@@ -82,7 +116,6 @@ def test_writer_blocks_readers():
     t_reader.join()
 
     # Expected order: Writer starts -> Writer ends -> Reader runs
-    # If Reader ran during Writer, we'd see "reader_run" between start/end
     assert log == ["writer_start", "writer_end", "reader_run"]
 
 
@@ -143,13 +176,6 @@ def test_writer_blocks_writer():
 def test_writer_priority_over_new_readers():
     """
     Verify that a WAITING writer blocks new readers (Anti-Starvation).
-
-    Scenario:
-    1. Reader 1 holds the lock.
-    2. Writer attempts to acquire lock and blocks (increments _writers_waiting).
-    3. Reader 2 attempts to acquire lock.
-
-    Expected: Reader 2 must NOT acquire the lock until after the Writer has finished.
     """
     lock = RWLock()
     log = []
@@ -168,8 +194,6 @@ def test_writer_priority_over_new_readers():
         r1_acquired.wait()  # Ensure R1 has the lock
         writer_queued.set()  # Signal that we are about to request lock
 
-        # This should block until R1 releases
-        # Crucially, simply entering this context manager increments _writers_waiting
         with lock.write_lock():
             log.append("Writer_work")
 
@@ -178,8 +202,6 @@ def test_writer_priority_over_new_readers():
         # Give the writer a tiny moment to execute the 'waiting' increment logic
         time.sleep(0.05)
 
-        # If priority logic is working, this blocks.
-        # If broken, R2 enters immediately because R1 is still holding read lock.
         with lock.read_lock():
             log.append("R2_work")
 
@@ -195,8 +217,6 @@ def test_writer_priority_over_new_readers():
     t_w.join()
     t_r2.join()
 
-    # If R2 ran before Writer, starvation protection failed.
-    # Correct order: R1 finishes -> Writer runs -> R2 runs
     assert log == ["R1_done", "Writer_work", "R2_work"]
 
 
@@ -225,3 +245,84 @@ def test_internal_state_integrity():
     assert lock._num_readers == 0
     assert lock._writer_active is False
     assert lock._writers_waiting == 0
+
+
+def test_writer_crash_unblocks_waiting_readers():
+    """
+    Verify liveness: If a writer crashes while waiting for the lock,
+    it must release its 'waiting' reservation so readers can proceed.
+
+    Scenario:
+    1. Reader 1 holds lock.
+    2. Writer 1 waits (writers_waiting = 1).
+       NOTE: Since Reader 1 is active, Writer 1 waits on _readers_ok condition!
+    3. Reader 2 waits (blocked by writers_waiting > 0).
+    4. Writer 1 crashes (simulated exception in wait()).
+    5. Writer 1 must decrement writers_waiting and NOTIFY all.
+    6. Reader 2 must wake up and acquire lock.
+    """
+    lock = RWLock()
+    execution_log = []
+
+    r1_acquired = threading.Event()
+    w1_ready_to_crash = threading.Event()
+
+    def r1_task():
+        with lock.read_lock():
+            r1_acquired.set()
+            # Hold lock long enough for W1 to enter and R2 to enter
+            time.sleep(0.5)
+            execution_log.append("R1_RELEASED")
+
+    def w1_task():
+        r1_acquired.wait()
+        # Sabotage BOTH conditions because we don't know for sure which one
+        # the implementation will choose (though we know it's readers_ok here).
+        original_readers_ok = lock._readers_ok
+        original_writers_ok = lock._writers_ok
+
+        lock._readers_ok = SabotagedCondition(original_readers_ok)
+        lock._writers_ok = SabotagedCondition(original_writers_ok)
+
+        try:
+            w1_ready_to_crash.set()
+            with lock.write_lock():
+                execution_log.append("W1_ACQUIRED_IMPOSSIBLE")
+        except SabotagedWaitError:
+            execution_log.append("W1_CRASHED")
+        finally:
+            # Restore real conditions
+            lock._readers_ok = original_readers_ok
+            lock._writers_ok = original_writers_ok
+
+    def r2_task():
+        w1_ready_to_crash.wait()
+        time.sleep(0.1)  # Ensure W1 is inside the wait block
+
+        # R2 tries to acquire. If bug exists, R2 sleeps forever here.
+        with lock.read_lock():
+            execution_log.append("R2_ACQUIRED")
+
+    t_r1 = threading.Thread(target=r1_task)
+    t_w1 = threading.Thread(target=w1_task)
+    t_r2 = threading.Thread(target=r2_task)
+
+    t_r1.start()
+    t_w1.start()
+    t_r2.start()
+
+    # Join with timeout to detect deadlock
+    t_r1.join(timeout=2)
+    t_w1.join(timeout=2)
+    t_r2.join(timeout=2)
+
+    if t_r2.is_alive():
+        pytest.fail("DEADLOCK: Reader 2 never acquired lock after Writer crash.")
+
+    assert "W1_CRASHED" in execution_log
+    assert "R2_ACQUIRED" in execution_log
+
+    # Verify state cleanup
+    assert lock._writers_waiting == 0
+    assert lock._num_readers == 0
+    assert not lock._writer_active

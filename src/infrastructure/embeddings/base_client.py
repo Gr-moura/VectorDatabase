@@ -7,7 +7,9 @@ from typing import List
 class IEmbeddingsClient(ABC):
 
     @abstractmethod
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(
+        self, texts: List[str], input_type: str = "search_document"
+    ) -> List[List[float]]:
         """
         Takes a list of texts and returns a list of their embedding vectors.
         """

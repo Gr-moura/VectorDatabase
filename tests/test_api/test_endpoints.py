@@ -18,7 +18,7 @@ def client():
     mock_embeddings.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
 
     # 2. Override the dependencies in the app
-    # This ensures the TestClient uses OUR mock and the specific repo instance we control
+    # This ensures the TestClient uses our mock and the specific repo instance we control
     app.dependency_overrides[get_embeddings_client] = lambda: mock_embeddings
 
     # Optional: If repository is injected via dependency, override it here too

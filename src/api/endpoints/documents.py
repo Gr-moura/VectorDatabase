@@ -1,8 +1,8 @@
-# vector_db_project/src/api/endpoints/documents.py
+# src/api/endpoints/documents.py
 
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from src.api import schemas
 from src.services.document_service import DocumentService
 from src.api.dependencies import get_document_service
@@ -18,9 +18,11 @@ router = APIRouter()
 def create_document(
     library_id: UUID,
     document_data: schemas.DocumentCreate,
+    response: Response,
     service: DocumentService = Depends(get_document_service),
 ):
     document = service.create_document(library_id, document_data)
+    response.headers["Location"] = f"/libraries/{library_id}/documents/{document.uid}"
     return schemas.DocumentResponse.from_model(document, library_id)
 
 
@@ -76,4 +78,4 @@ def delete_document(
     service: DocumentService = Depends(get_document_service),
 ):
     service.delete_document(library_id, document_id)
-    return
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

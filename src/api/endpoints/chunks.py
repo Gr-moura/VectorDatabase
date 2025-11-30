@@ -1,6 +1,6 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from src.api import schemas
 from src.services.chunk_service import ChunkService
 from src.api.dependencies import get_chunk_service
@@ -17,9 +17,13 @@ def create_chunk(
     library_id: UUID,
     document_id: UUID,
     chunk_data: schemas.ChunkCreate,
+    response: Response,
     service: ChunkService = Depends(get_chunk_service),
 ):
     chunk = service.create_chunk(library_id, document_id, chunk_data)
+    response.headers["Location"] = (
+        f"/libraries/{library_id}/documents/{document_id}/chunks/{chunk.uid}"
+    )
     return schemas.ChunkResponse.from_model(chunk, library_id, document_id)
 
 
@@ -82,4 +86,4 @@ def delete_chunk(
     service: ChunkService = Depends(get_chunk_service),
 ):
     service.delete_chunk(library_id, document_id, chunk_id)
-    return
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

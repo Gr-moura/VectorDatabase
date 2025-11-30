@@ -1,8 +1,8 @@
-# vector_db_project/src/api/endpoints/libraries.py
+# src/api/endpoints/libraries.py
 
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from src.api import schemas
 from src.services.library_service import LibraryService
 from src.api.dependencies import get_library_service
@@ -15,9 +15,11 @@ router = APIRouter()
 )
 def create_library(
     library_data: schemas.LibraryCreate,
+    response: Response,  # Inject Response to set headers
     service: LibraryService = Depends(get_library_service),
 ):
     library = service.create_library(library_data)
+    response.headers["Location"] = f"/libraries/{library.uid}"
     return schemas.LibraryResponse.from_model(library)
 
 
@@ -60,4 +62,4 @@ def delete_library(
     library_id: UUID, service: LibraryService = Depends(get_library_service)
 ):
     service.delete_library(library_id)
-    return
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

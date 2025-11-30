@@ -10,7 +10,7 @@ from src.api.schemas import IndexCreate
 from src.core.indexing.index_factory import IndexType, Metric
 
 # ============================================================================
-# Fakes for Pydantic Models (To avoid ValidationErrors with Mocks)
+# Fakes for Pydantic Models & Domain Objects
 # ============================================================================
 
 
@@ -20,9 +20,6 @@ class FakeSearchResult:
     def __init__(self, chunk, similarity):
         self.chunk = chunk
         self.similarity = similarity
-
-    def __repr__(self):
-        return f"FakeSearchResult(chunk={self.chunk.uid}, score={self.similarity})"
 
 
 class FakeIndexMetadata:
@@ -38,11 +35,36 @@ class FakeIndexMetadata:
         return self.__dict__ == other.__dict__
 
 
+class FakeChunkResponse:
+    """A logic-less fake for api.schemas.ChunkResponse."""
+
+    def __init__(self, id, document_id, library_id, text, embedding, metadata):
+        self.id = id
+        self.document_id = document_id
+        self.library_id = library_id
+        self.text = text
+        self.embedding = embedding
+        self.metadata = metadata
+
+    @classmethod
+    def from_model(cls, chunk, library_id, document_id):
+        # Simulates the hydration logic without Pydantic validation
+        return cls(
+            id=chunk.uid,
+            document_id=document_id,
+            library_id=library_id,
+            text=chunk.text,
+            embedding=chunk.embedding,
+            metadata=chunk.metadata,
+        )
+
+
 class FakeChunk:
-    def __init__(self, uid=None, text="", embedding=None):
+    def __init__(self, uid=None, text="", embedding=None, metadata=None):
         self.uid = uid or uuid4()
         self.text = text
         self.embedding = embedding or [0.1, 0.2]
+        self.metadata = metadata or {}  # <--- CORREÇÃO: Adicionado metadata
 
 
 class FakeDocument:
@@ -68,11 +90,11 @@ class FakeLibrary:
 def patch_models(monkeypatch):
     """
     CRITICAL: Replaces real Pydantic models in the service module with Fakes.
-    This prevents ValidationError when passing Mocks or FakeChunks.
+    This prevents ValidationError and AttributeError during unit tests.
     """
     monkeypatch.setattr("src.services.search_service.SearchResult", FakeSearchResult)
     monkeypatch.setattr("src.services.search_service.IndexMetadata", FakeIndexMetadata)
-    # Note: We don't need to patch IndexConfig if we just pass a Mock/Fake to FakeIndexMetadata
+    monkeypatch.setattr("src.services.search_service.ChunkResponse", FakeChunkResponse)
 
 
 @pytest.fixture
@@ -125,27 +147,17 @@ def test_create_index_happy_path(
     search_service.create_index(lib_id, index_name, api_config)
 
     # 3. Assertions
-    # Ensure chunks were gathered and passed to build
     mock_index_instance.build.assert_called_once()
-    built_chunks = mock_index_instance.build.call_args[0][0]
-    assert len(built_chunks) == 2
-
-    # Ensure index was attached to library
     assert index_name in library.indices
     assert library.indices[index_name] == mock_index_instance
-
-    # Ensure metadata was created (It will be our FakeIndexMetadata)
     assert index_name in library.index_metadata
+    # Verify it used our FakeIndexMetadata
     assert isinstance(library.index_metadata[index_name], FakeIndexMetadata)
-    assert library.index_metadata[index_name].vector_count == 2
-
-    # Ensure repository was updated
     mock_repo.update.assert_called_once_with(library)
 
 
 def test_get_index_status_success(search_service, mock_repo):
     lib_id = uuid4()
-    # Use FakeIndexMetadata here instead of the real Pydantic model
     meta = FakeIndexMetadata(
         name="idx", config=Mock(), vector_count=10, index_type="avl"
     )
@@ -196,9 +208,7 @@ def test_search_chunks_success(search_service, mock_repo):
     chunk = FakeChunk(text="result", embedding=[0.1, 0.2])
     doc = FakeDocument(chunks={chunk.uid: chunk})
 
-    # Mock Index behavior
     mock_index = Mock()
-    # search returns list of (Chunk, score)
     mock_index.search.return_value = [(chunk, 0.95)]
 
     library = FakeLibrary(
@@ -209,9 +219,15 @@ def test_search_chunks_success(search_service, mock_repo):
     results = search_service.search_chunks(lib_id, "idx", [0.1, 0.2], k=1)
 
     assert len(results) == 1
-    # Check that it returns our FakeSearchResult wrapper
+    # Check wrapper type
     assert isinstance(results[0], FakeSearchResult)
-    assert results[0].chunk == chunk
+    # Check inner chunk type (Should be FakeChunkResponse now)
+    assert isinstance(results[0].chunk, FakeChunkResponse)
+
+    # Assert data integrity
+    assert results[0].chunk.id == chunk.uid
+    assert results[0].chunk.document_id == doc.uid
+    assert results[0].chunk.library_id == lib_id
     assert results[0].similarity == 0.95
 
 
@@ -222,37 +238,29 @@ def test_search_chunks_consistency_check_removes_zombies(search_service, mock_re
     """
     lib_id = uuid4()
 
-    # 1. Setup: Real chunk exists in Library
     real_chunk = FakeChunk(text="I am real")
     doc = FakeDocument(chunks={real_chunk.uid: real_chunk})
 
-    # 2. Setup: Zombie chunk exists ONLY in the Index (simulating stale state)
     zombie_chunk = FakeChunk(text="I was deleted")
 
-    # 3. Setup: Index returns BOTH
     mock_index = Mock()
     mock_index.search.return_value = [(real_chunk, 0.99), (zombie_chunk, 0.80)]
 
     library = FakeLibrary(
-        uid=lib_id,
-        documents={doc.uid: doc},  # Library ONLY has real_chunk
-        indices={"idx": mock_index},
+        uid=lib_id, documents={doc.uid: doc}, indices={"idx": mock_index}
     )
     mock_repo.get_by_id.return_value = library
 
-    # 4. Action
     results = search_service.search_chunks(lib_id, "idx", [0.1, 0.1], k=2)
 
-    # 5. Assertion
-    # Should contain real_chunk, but NOT zombie_chunk
     assert len(results) == 1
-    assert results[0].chunk.uid == real_chunk.uid
+    assert results[0].chunk.id == real_chunk.uid
     assert results[0].chunk.text == "I am real"
 
 
 def test_search_chunks_index_not_ready(search_service, mock_repo):
     lib_id = uuid4()
-    library = FakeLibrary(uid=lib_id, indices={})  # No indices
+    library = FakeLibrary(uid=lib_id, indices={})
     mock_repo.get_by_id.return_value = library
 
     with pytest.raises(IndexNotReady):

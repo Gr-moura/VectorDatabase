@@ -1,4 +1,4 @@
-# vector_db_project/src/api/schemas.py
+# src/api/schemas.py
 
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
@@ -74,7 +74,7 @@ class AllIndicesStatusResponse(BaseModel):
 
 # ============================================================================
 # CHUNK SCHEMAS
-# ===========================================================================
+# ============================================================================
 
 
 class ChunkCreate(BaseModel):
@@ -87,11 +87,14 @@ class ChunkUpdate(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
-class ChunkResponse(Chunk):
+class ChunkResponse(BaseModel):
     model_config = API_MODEL_CONFIG
     id: UUID
     document_id: UUID
     library_id: UUID
+    text: str
+    embedding: Optional[List[float]] = None
+    metadata: Dict[str, Any]
 
     @classmethod
     def from_model(cls, chunk: Chunk, library_id: UUID, document_id: UUID):
@@ -99,7 +102,9 @@ class ChunkResponse(Chunk):
             id=chunk.uid,
             document_id=document_id,
             library_id=library_id,
-            **chunk.model_dump(exclude={"uid"}),
+            text=chunk.text,
+            embedding=chunk.embedding,
+            metadata=chunk.metadata,
         )
 
 
@@ -122,11 +127,20 @@ class DocumentResponse(BaseModel):
     id: UUID
     library_id: UUID
     metadata: Dict[str, Any]
-    chunks: Dict[UUID, Chunk]
+    chunks: Dict[UUID, ChunkResponse]
 
     @classmethod
     def from_model(cls, doc: Document, library_id: UUID):
-        return cls(id=doc.uid, library_id=library_id, **doc.model_dump(exclude={"uid"}))
+        chunks_response = {
+            uid: ChunkResponse.from_model(chunk, library_id, doc.uid)
+            for uid, chunk in doc.chunks.items()
+        }
+        return cls(
+            id=doc.uid,
+            library_id=library_id,
+            metadata=doc.metadata,
+            chunks=chunks_response,
+        )
 
 
 # ============================================================================
@@ -146,30 +160,27 @@ class LibraryResponse(BaseModel):
     model_config = API_MODEL_CONFIG
     id: UUID
     metadata: Dict[str, Any]
-    documents: Dict[UUID, Document]
+    documents: Dict[UUID, DocumentResponse]
 
     @classmethod
     def from_model(cls, lib: Library):
-        return cls(id=lib.uid, **lib.model_dump(exclude={"uid"}))
+        docs_response = {
+            uid: DocumentResponse.from_model(doc, lib.uid)
+            for uid, doc in lib.documents.items()
+        }
+        return cls(id=lib.uid, metadata=lib.metadata, documents=docs_response)
 
 
 # ============================================================================
 # SEARCH SCHEMAS
 # ============================================================================
-class SearchQuery(BaseModel):
-    """Request model for a vector search query."""
 
-    query_embedding: List[float] = Field(
-        ..., description="The embedding vector for the query."
-    )
-    k: int = Field(3, gt=0, description="The number of nearest neighbors to return.")
+
+class SearchQuery(BaseModel):
+    query_embedding: List[float]
+    k: int = Field(3, gt=0)
 
 
 class SearchResult(BaseModel):
-    """Response model for a single search result item."""
-
-    chunk: Chunk
-    similarity: float = Field(
-        ...,
-        description="The search score. For cosine, higher is better. For euclidean, lower is better.",
-    )
+    chunk: ChunkResponse
+    similarity: float

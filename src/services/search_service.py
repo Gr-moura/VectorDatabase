@@ -4,7 +4,7 @@ import logging
 from uuid import UUID
 from typing import List, Dict, Optional
 
-from src.api.schemas import SearchResult, IndexCreate
+from src.api.schemas import SearchResult, IndexCreate, ChunkResponse
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.indexing.index_factory import IndexFactory, IndexType
 from src.core.models import Chunk, Library, IndexMetadata, IndexConfig
@@ -106,22 +106,26 @@ class SearchService:
                 f"Index '{index_name}' is not ready for search. It may need to be rebuilt."
             )
 
-        # Raw results from the index (might contain stale objects)
         raw_results = index.search(query_embedding, k)
-
         validated_results: List[SearchResult] = []
 
         for index_chunk, score in raw_results:
-            found_chunk: Optional[Chunk] = None
+            found_chunk_response: Optional[ChunkResponse] = None
 
             for document in library.documents.values():
                 if index_chunk.uid in document.chunks:
-                    found_chunk = document.chunks[index_chunk.uid]
+                    domain_chunk = document.chunks[index_chunk.uid]
+
+                    found_chunk_response = ChunkResponse.from_model(
+                        chunk=domain_chunk,
+                        library_id=library.uid,
+                        document_id=document.uid,
+                    )
                     break
 
-            if found_chunk:
+            if found_chunk_response:
                 validated_results.append(
-                    SearchResult(chunk=found_chunk, similarity=score)
+                    SearchResult(chunk=found_chunk_response, similarity=score)
                 )
             else:
                 logger.warning(

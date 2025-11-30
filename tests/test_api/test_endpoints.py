@@ -1,17 +1,34 @@
-# vector_db_project/tests/test_api/test_endpoints.py
+# tests/test_api/test_endpoints.py
 
+from unittest.mock import Mock
 import pytest
 from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from main import app
-from src.api.dependencies import library_repository
+from src.api.dependencies import get_embeddings_client, library_repository
+from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 
 
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
-    return TestClient(app)
+    # 1. Create a Mock Embeddings Client to prevent real API calls
+    mock_embeddings = Mock(spec=IEmbeddingsClient)
+    mock_embeddings.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
+
+    # 2. Override the dependencies in the app
+    # This ensures the TestClient uses OUR mock and the specific repo instance we control
+    app.dependency_overrides[get_embeddings_client] = lambda: mock_embeddings
+
+    # Optional: If repository is injected via dependency, override it here too
+    # app.dependency_overrides[get_repository] = lambda: library_repository
+
+    with TestClient(app) as c:
+        yield c
+
+    # 3. Clean up overrides
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)

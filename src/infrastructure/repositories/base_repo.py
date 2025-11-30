@@ -1,4 +1,4 @@
-# vector_db_project/src/infrastructure/repositories/base_repo.py
+# src/infrastructure/repositories/base_repo.py
 
 from abc import ABC, abstractmethod
 from typing import List

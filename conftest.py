@@ -1,4 +1,4 @@
-# tests/test_api/conftest.py
+# conftest.py
 
 import pytest
 from uuid import UUID, uuid4

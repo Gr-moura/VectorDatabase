@@ -8,7 +8,6 @@ import numpy as np
 from tests.test_api.test_endpoints import create_chunk_via_api
 
 # Pytest will automatically discover and inject fixtures from conftest.py
-# No imports from conftest.py are needed.
 
 # This list drives the parameterized tests. All index types are included.
 SUPPORTED_INDEX_TYPES = ["avl", "lsh"]
@@ -40,6 +39,7 @@ def test_get_index_status_on_new_library_is_not_found(client, create_library_via
     # Try to get status of an index that was never created
     response = client.get(f"/libraries/{lib['id']}/index/my-test-index")
 
+    # Expecting 404 Not Found as per the corrected exception handling
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "not found" in response.json()["detail"].lower()
 
@@ -158,6 +158,7 @@ def test_search_finds_correct_nearest_neighbor(
     assert len(results) == 2
 
     # The order can vary slightly in ANN, so check for presence first
+    # Note: results[i]["chunk"] is now a ChunkResponse object, so we access fields directly
     result_texts = {res["chunk"]["text"] for res in results}
     assert "cat" in result_texts
     assert "kitten" in result_texts
@@ -197,15 +198,46 @@ def test_search_respects_k_parameter(client, library_with_all_indices, index_typ
 
     results = response_k3.json()
 
-    # FIX: LSH is approximate. With small datasets, recall < 100% is expected.
+    # LSH is approximate. With small datasets, recall < 100% is expected.
     # It filters based on buckets. If buckets are empty, it returns fewer items.
     if index_type == "lsh":
         assert len(results) <= 3
-        # Optional: ensure it returns at least the exact match itself
         assert len(results) >= 1
     else:
         # Exact/Tree indices should strictly return k if N >= k
         assert len(results) == 3
+
+
+def test_search_using_raw_text_generates_embeddings_backend(
+    client, library_with_all_indices
+):
+    """
+    QA Goal: Verify that the user can pass 'query_text' without 'query_embedding'.
+    The backend should generate the embedding using the injected EmbeddingsClient.
+    """
+    lib_id = library_with_all_indices["id"]
+    # We use AVL for deterministic behavior
+    index_name = "avl-index"
+
+    # Payload with ONLY text, NO embedding
+    # The Mock Embeddings Client (injected in fixtures) will generate the vector.
+    search_payload = {"query_text": "search query for cat", "k": 1}
+
+    response = client.post(
+        f"/libraries/{lib_id}/search/{index_name}", json=search_payload
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    results = response.json()
+
+    # We expect results because the mocked client returns a valid vector (e.g. [0.1, 0.2...])
+    # that matches the dimensions of the vectors in the index.
+    assert len(results) == 1
+    assert "chunk" in results[0]
+    assert "similarity" in results[0]
+    # Check that the response structure is correct (ChunkResponse hydration)
+    assert "id" in results[0]["chunk"]
+    assert "document_id" in results[0]["chunk"]
 
 
 # ============================================================================
@@ -284,7 +316,7 @@ def test_adding_chunk_handles_index_update_correctly(
     create_index_via_api,
 ):
     """
-    QA Goal: CRITICAL! Verify that data modification correctly handles updates
+    QA Goal: Verify that data modification correctly handles updates
     for each index type (live update for AVL and LSH).
     """
     lib = create_library_via_api()

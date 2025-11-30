@@ -1,6 +1,6 @@
-# vector_db_project/src/core/models.py
+# src/core/models.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 from typing import TYPE_CHECKING
@@ -69,11 +69,20 @@ class Library(BaseModel):
     documents: Dict[UUID, Document] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    indices: Dict[str, "VectorIndex"] = Field(default_factory=dict, exclude=True)
     index_metadata: Dict[str, IndexMetadata] = Field(default_factory=dict)
 
+    _indices: Dict[str, "VectorIndex"] = PrivateAttr(default_factory=dict)
 
-from src.core.indexing.base_index import VectorIndex
+    version: int = Field(default=1, description="Optimistic locking version")
 
-# Rebuild models to resolve the forward reference for VectorIndex
-Library.model_rebuild()
+    @property
+    def indices(self) -> Dict[str, "VectorIndex"]:
+        """Exposes the internal runtime indices safely."""
+        return self._indices
+
+    def add_index(self, name: str, index: "VectorIndex"):
+        """Encapsulates adding an index to ensure type safety at runtime."""
+        self._indices[name] = index
+
+    def get_index(self, name: str) -> Optional["VectorIndex"]:
+        return self._indices.get(name)

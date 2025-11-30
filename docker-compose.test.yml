@@ -1,0 +1,11 @@
+services:
+  tests:
+    build: .
+    environment:
+      - APP_ENV=testing
+      # Prevent Python from writing .pyc files to the host volume
+      - PYTHONDONTWRITEBYTECODE=1
+      # Mock key to pass config validation (tests mock the actual client)
+      - COHERE_API_KEY=mock-key-for-ci
+    # Override the default 'uvicorn' command to run pytest
+    command: pytest -v

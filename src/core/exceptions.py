@@ -1,4 +1,4 @@
-# vector_db_project/src/core/exceptions.py
+# src/core/exceptions.py
 
 
 class LibraryNotFound(Exception):
@@ -27,5 +27,11 @@ class IndexNotReady(Exception):
 
 class IndexNotFound(Exception):
     """Raised when a specified index is not found in the library."""
+
+    pass
+
+
+class VectorDimensionMismatch(Exception):
+    """Raised when there is a dimension mismatch during search operations."""
 
     pass

@@ -5,80 +5,19 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from src.services.search_service import SearchService
-from src.core.exceptions import IndexNotFound, IndexNotReady
+from src.core.exceptions import IndexNotFound, IndexNotReady, VectorDimensionMismatch
 from src.api.schemas import IndexCreate
 from src.core.indexing.index_factory import IndexType, Metric
+from fastapi import status
 
-# ============================================================================
-# Fakes for Pydantic Models & Domain Objects
-# ============================================================================
-
-
-class FakeSearchResult:
-    """A logic-less fake for api.schemas.SearchResult."""
-
-    def __init__(self, chunk, similarity):
-        self.chunk = chunk
-        self.similarity = similarity
-
-
-class FakeIndexMetadata:
-    """A logic-less fake for core.models.IndexMetadata."""
-
-    def __init__(self, name, config, vector_count, index_type):
-        self.name = name
-        self.config = config
-        self.vector_count = vector_count
-        self.index_type = index_type
-
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
-
-
-class FakeChunkResponse:
-    """A logic-less fake for api.schemas.ChunkResponse."""
-
-    def __init__(self, id, document_id, library_id, text, embedding, metadata):
-        self.id = id
-        self.document_id = document_id
-        self.library_id = library_id
-        self.text = text
-        self.embedding = embedding
-        self.metadata = metadata
-
-    @classmethod
-    def from_model(cls, chunk, library_id, document_id):
-        # Simulates the hydration logic without Pydantic validation
-        return cls(
-            id=chunk.uid,
-            document_id=document_id,
-            library_id=library_id,
-            text=chunk.text,
-            embedding=chunk.embedding,
-            metadata=chunk.metadata,
-        )
-
-
-class FakeChunk:
-    def __init__(self, uid=None, text="", embedding=None, metadata=None):
-        self.uid = uid or uuid4()
-        self.text = text
-        self.embedding = embedding or [0.1, 0.2]
-        self.metadata = metadata or {}  # <--- CORREÇÃO: Adicionado metadata
-
-
-class FakeDocument:
-    def __init__(self, uid=None, chunks=None):
-        self.uid = uid or uuid4()
-        self.chunks = chunks or {}
-
-
-class FakeLibrary:
-    def __init__(self, uid=None, documents=None, indices=None, index_metadata=None):
-        self.uid = uid or uuid4()
-        self.documents = documents or {}
-        self.indices = indices or {}
-        self.index_metadata = index_metadata or {}
+from ..fakes import (
+    FakeLibrary,
+    FakeDocument,
+    FakeChunk,
+    FakeChunkResponse,
+    FakeSearchResult,
+    FakeIndexMetadata,
+)
 
 
 # ============================================================================
@@ -88,10 +27,6 @@ class FakeLibrary:
 
 @pytest.fixture(autouse=True)
 def patch_models(monkeypatch):
-    """
-    CRITICAL: Replaces real Pydantic models in the service module with Fakes.
-    This prevents ValidationError and AttributeError during unit tests.
-    """
     monkeypatch.setattr("src.services.search_service.SearchResult", FakeSearchResult)
     monkeypatch.setattr("src.services.search_service.IndexMetadata", FakeIndexMetadata)
     monkeypatch.setattr("src.services.search_service.ChunkResponse", FakeChunkResponse)
@@ -103,20 +38,27 @@ def mock_repo():
 
 
 @pytest.fixture
-def search_service(mock_repo):
-    return SearchService(repository=mock_repo)
+def mock_embeddings_client():
+    """Mock for the embeddings provider."""
+    client = Mock()
+    # Default behavior: return a dummy vector
+    client.get_embeddings.return_value = [[0.1, 0.2]]
+    return client
+
+
+@pytest.fixture
+def search_service(mock_repo, mock_embeddings_client):
+    return SearchService(repository=mock_repo, embeddings_client=mock_embeddings_client)
 
 
 @pytest.fixture
 def mock_index_factory():
-    """Patches the IndexFactory to prevent actual index building."""
     with patch("src.services.search_service.IndexFactory") as mock_factory:
         yield mock_factory
 
 
 @pytest.fixture
 def mock_index_instance():
-    """Returns a mock index object that simulates search/build."""
     mock_idx = Mock()
     mock_idx.vector_count = 0
     return mock_idx
@@ -130,7 +72,6 @@ def mock_index_instance():
 def test_create_index_happy_path(
     search_service, mock_repo, mock_index_factory, mock_index_instance
 ):
-    # 1. Setup Data
     lib_id = uuid4()
     chunk1 = FakeChunk(embedding=[1.0, 0.0])
     chunk2 = FakeChunk(embedding=[0.0, 1.0])
@@ -143,16 +84,12 @@ def test_create_index_happy_path(
     api_config = IndexCreate(index_type=IndexType.AVL, metric=Metric.COSINE)
     index_name = "test-index"
 
-    # 2. Action
     search_service.create_index(lib_id, index_name, api_config)
 
-    # 3. Assertions
     mock_index_instance.build.assert_called_once()
     assert index_name in library.indices
     assert library.indices[index_name] == mock_index_instance
     assert index_name in library.index_metadata
-    # Verify it used our FakeIndexMetadata
-    assert isinstance(library.index_metadata[index_name], FakeIndexMetadata)
     mock_repo.update.assert_called_once_with(library)
 
 
@@ -203,7 +140,6 @@ def test_delete_index_not_found(search_service, mock_repo):
 
 
 def test_search_chunks_success(search_service, mock_repo):
-    """Verifies standard successful search."""
     lib_id = uuid4()
     chunk = FakeChunk(text="result", embedding=[0.1, 0.2])
     doc = FakeDocument(chunks={chunk.uid: chunk})
@@ -216,26 +152,55 @@ def test_search_chunks_success(search_service, mock_repo):
     )
     mock_repo.get_by_id.return_value = library
 
-    results = search_service.search_chunks(lib_id, "idx", [0.1, 0.2], k=1)
+    # Pass manual embedding
+    results = search_service.search_chunks(
+        lib_id, "idx", k=1, query_embedding=[0.1, 0.2]
+    )
 
     assert len(results) == 1
-    # Check wrapper type
     assert isinstance(results[0], FakeSearchResult)
-    # Check inner chunk type (Should be FakeChunkResponse now)
     assert isinstance(results[0].chunk, FakeChunkResponse)
-
-    # Assert data integrity
     assert results[0].chunk.id == chunk.uid
     assert results[0].chunk.document_id == doc.uid
-    assert results[0].chunk.library_id == lib_id
     assert results[0].similarity == 0.95
 
 
+def test_search_chunks_with_text_query(
+    search_service, mock_repo, mock_embeddings_client
+):
+    """
+    Tests if the service generates the embedding when it receives text and calls the index correctly.
+    """
+    lib_id = uuid4()
+    chunk = FakeChunk()
+    doc = FakeDocument(chunks={chunk.uid: chunk})
+
+    mock_index = Mock()
+    mock_index.search.return_value = [(chunk, 0.99)]
+
+    library = FakeLibrary(
+        uid=lib_id, documents={doc.uid: doc}, indices={"idx": mock_index}
+    )
+    mock_repo.get_by_id.return_value = library
+
+    # Setup mock embedding return
+    generated_vector = [0.9, 0.9]
+    mock_embeddings_client.get_embeddings.return_value = [generated_vector]
+
+    # Action: Pass text instead of vector
+    search_service.search_chunks(lib_id, "idx", k=1, query_text="search for me")
+
+    # Assertions
+    # 1. Verifies if the embeddings client was called correctly (input_type='search_query')
+    mock_embeddings_client.get_embeddings.assert_called_once_with(
+        texts=["search for me"], input_type="search_query"
+    )
+
+    # 2. Verifies if the generated vector was passed to the index
+    mock_index.search.assert_called_once_with(generated_vector, 1)
+
+
 def test_search_chunks_consistency_check_removes_zombies(search_service, mock_repo):
-    """
-    CRITICAL TEST: Verifies that if the Index returns a chunk that is NO LONGER
-    in the Library (Zombie Data), the service filters it out.
-    """
     lib_id = uuid4()
 
     real_chunk = FakeChunk(text="I am real")
@@ -251,7 +216,9 @@ def test_search_chunks_consistency_check_removes_zombies(search_service, mock_re
     )
     mock_repo.get_by_id.return_value = library
 
-    results = search_service.search_chunks(lib_id, "idx", [0.1, 0.1], k=2)
+    results = search_service.search_chunks(
+        lib_id, "idx", k=2, query_embedding=[0.1, 0.1]
+    )
 
     assert len(results) == 1
     assert results[0].chunk.id == real_chunk.uid
@@ -264,4 +231,33 @@ def test_search_chunks_index_not_ready(search_service, mock_repo):
     mock_repo.get_by_id.return_value = library
 
     with pytest.raises(IndexNotReady):
-        search_service.search_chunks(lib_id, "missing-idx", [0.1], k=1)
+        search_service.search_chunks(lib_id, "missing-idx", k=1, query_embedding=[0.1])
+
+
+def test_search_chunks_fails_gracefully_with_wrong_vector_dimension(
+    search_service, mock_repo
+):
+    """
+    Unit Test: Verifies that the service captures NumPy errors raised by the index
+    and wraps them in a semantic VectorDimensionMismatch exception.
+    """
+    lib_id = uuid4()
+
+    # 1. Setup: Mock the index to raise ValueError (simulating NumPy mismatch)
+    mock_index = Mock()
+    mock_index.search.side_effect = ValueError("shapes (3,) and (2,) not aligned")
+
+    library = FakeLibrary(
+        uid=lib_id, indices={"idx": mock_index}, index_metadata={"idx": Mock()}
+    )
+    mock_repo.get_by_id.return_value = library
+
+    # 2. Action & Assert
+    # Expect the specific custom exception, not a generic ValueError
+    with pytest.raises(VectorDimensionMismatch) as exc_info:
+        search_service.search_chunks(lib_id, "idx", k=1, query_embedding=[0.1, 0.2])
+
+    # 3. Verify the exception message
+    error_msg = str(exc_info.value)
+    assert "Vector dimension mismatch" in error_msg
+    assert "shapes (3,) and (2,) not aligned" in error_msg

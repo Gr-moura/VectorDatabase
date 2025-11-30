@@ -10,6 +10,7 @@ from src.services.chunk_service import ChunkService
 from src.services.search_service import SearchService
 from src.infrastructure.embeddings.base_client import IEmbeddingsClient
 from src.infrastructure.embeddings.cohere_client import CohereClient
+from src.infrastructure.config import COHERE_API_KEY
 
 # ============================================================================
 # SINGLETON INSTANCES
@@ -28,7 +29,7 @@ def get_embeddings_client() -> IEmbeddingsClient:
     Provides a singleton Cohere embeddings client.
     LRU Cache ensures we reuse the connection pool across requests.
     """
-    return CohereClient()
+    return CohereClient(api_key=COHERE_API_KEY)
 
 
 def get_library_service() -> LibraryService:
@@ -52,5 +53,9 @@ def get_chunk_service(
     )
 
 
-def get_search_service() -> SearchService:
-    return SearchService(repository=library_repository)
+def get_search_service(
+    embeddings_client: IEmbeddingsClient = Depends(get_embeddings_client),
+) -> SearchService:
+    return SearchService(
+        repository=library_repository, embeddings_client=embeddings_client
+    )

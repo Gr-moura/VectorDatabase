@@ -1,6 +1,6 @@
 # src/api/schemas.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Dict, List, Optional, Any
 from uuid import UUID
 
@@ -177,8 +177,18 @@ class LibraryResponse(BaseModel):
 
 
 class SearchQuery(BaseModel):
-    query_embedding: List[float]
+    # Accepts either text or embedding for search
+    query_text: Optional[str] = None
+    query_embedding: Optional[List[float]] = None
     k: int = Field(3, gt=0)
+
+    @model_validator(mode="after")
+    def check_input_exists(self):
+        if not self.query_text and not self.query_embedding:
+            raise ValueError(
+                "Either 'query_text' or 'query_embedding' must be provided."
+            )
+        return self
 
 
 class SearchResult(BaseModel):

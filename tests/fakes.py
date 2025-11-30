@@ -30,6 +30,29 @@ class FakeChunk:
         return self.__dict__.copy()
 
 
+class FakeChunkResponse:
+    """A logic-less fake for api.schemas.ChunkResponse."""
+
+    def __init__(self, id, document_id, library_id, text, embedding, metadata):
+        self.id = id
+        self.document_id = document_id
+        self.library_id = library_id
+        self.text = text
+        self.embedding = embedding
+        self.metadata = metadata
+
+    @classmethod
+    def from_model(cls, chunk, library_id, document_id):
+        return cls(
+            id=chunk.uid,
+            document_id=document_id,
+            library_id=library_id,
+            text=chunk.text,
+            embedding=chunk.embedding,
+            metadata=chunk.metadata,
+        )
+
+
 class FakeDocument:
     """A fake version of the core.models.Document for unit tests."""
 
@@ -118,3 +141,29 @@ class FakeSchema:
         if exclude:
             return {k: v for k, v in self._data.items() if k not in exclude}
         return dict(self._data)
+
+
+# ============================================================================
+# Fakes for Pydantic Models & Domain Objects
+# ============================================================================
+
+
+class FakeSearchResult:
+    """A logic-less fake for api.schemas.SearchResult."""
+
+    def __init__(self, chunk, similarity):
+        self.chunk = chunk
+        self.similarity = similarity
+
+
+class FakeIndexMetadata:
+    """A logic-less fake for core.models.IndexMetadata."""
+
+    def __init__(self, name, config, vector_count, index_type):
+        self.name = name
+        self.config = config
+        self.vector_count = vector_count
+        self.index_type = index_type
+
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__

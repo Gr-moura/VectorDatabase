@@ -25,13 +25,27 @@ class InMemoryLibraryRepository(ILibraryRepository):
             self._data[lib_copy.uid] = lib_copy
 
     def update(self, library: Library) -> None:
-        lib_copy = library.model_copy(deep=True)
+        # Increments version to signal change
+        new_version = library.version + 1
 
+        lib_copy = library.model_copy(deep=True, update={"version": new_version})
         with self._lock.write_lock():
-            if lib_copy.uid not in self._data:
-                raise LibraryNotFound(f"Library with id {lib_copy.uid} not found")
+            current_entry = self._data.get(library.uid)
+
+            if not current_entry:
+                raise LibraryNotFound(f"Library with id {library.uid} not found")
+
+            if current_entry.version != library.version:
+                raise ValueError(
+                    f"Conflict detected: Library {library.uid} has changed. "
+                    f"Expected version {current_entry.version}, got {library.version}. "
+                    "Please retry operation."
+                )
 
             self._data[lib_copy.uid] = lib_copy
+
+            # Updates the caller's object to reflect the new accepted version
+            library.version = new_version
 
     def delete(self, library_id: UUID) -> None:
         with self._lock.write_lock():

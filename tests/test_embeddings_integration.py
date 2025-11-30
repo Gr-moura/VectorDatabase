@@ -4,7 +4,6 @@ import pytest
 from uuid import uuid4
 from fastapi import status
 
-# The fixtures from conftest.py (client, factory helpers) are automatically available.
 
 # ============================================================================
 # Test API Endpoint Behavior with Automatic Embeddings

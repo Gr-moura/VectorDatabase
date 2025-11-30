@@ -23,8 +23,17 @@ class LibraryService:
         self, library_id: UUID, library_update: LibraryUpdate
     ) -> Library:
         library = self.repository.get_by_id(library_id)
+
+        # 1. Get current data
+        current_data = library.model_dump()
+
+        # 2. Merge with update data
         update_data = library_update.model_dump(exclude_unset=True)
-        updated_library = library.model_copy(update=update_data)
+        current_data.update(update_data)
+
+        # 3. Create new instance to enforce validation rules
+        updated_library = Library(**current_data)
+
         self.repository.update(updated_library)
         return updated_library
 

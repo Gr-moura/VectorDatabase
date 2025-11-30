@@ -25,6 +25,10 @@ class FakeChunk:
             data.update(update)
         return FakeChunk(**data)
 
+    def model_dump(self, exclude=None, exclude_unset=False) -> Dict[str, Any]:
+        """Simulates Pydantic model_dump by returning instance attributes."""
+        return self.__dict__.copy()
+
 
 class FakeDocument:
     """A fake version of the core.models.Document for unit tests."""
@@ -46,6 +50,10 @@ class FakeDocument:
         new_doc = FakeDocument(**data)
         new_doc.chunks = dict(self.chunks)
         return new_doc
+
+    def model_dump(self, exclude=None, exclude_unset=False) -> Dict[str, Any]:
+        """Simulates Pydantic model_dump by returning instance attributes."""
+        return self.__dict__.copy()
 
 
 class FakeLibrary:
@@ -72,6 +80,10 @@ class FakeLibrary:
         new_lib.indices = dict(self.indices)
         new_lib.index_metadata = dict(self.index_metadata)
         return new_lib
+
+    def model_dump(self, exclude=None, exclude_unset=False) -> Dict[str, Any]:
+        """Simulates Pydantic model_dump by returning instance attributes."""
+        return self.__dict__.copy()
 
 
 # ============================================================================
@@ -101,6 +113,7 @@ class FakeSchema:
     ) -> Dict[str, Any]:
         """Mimics Pydantic's model_dump behavior used in services."""
         if exclude_unset:
+            # Simple simulation: return everything because 'unset' logic is complex in fakes
             return dict(self._data)
         if exclude:
             return {k: v for k, v in self._data.items() if k not in exclude}

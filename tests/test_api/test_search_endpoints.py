@@ -11,7 +11,7 @@ from tests.test_api.test_endpoints import create_chunk_via_api
 # No imports from conftest.py are needed.
 
 # This list drives the parameterized tests. All index types are included.
-SUPPORTED_INDEX_TYPES = ["avl"]
+SUPPORTED_INDEX_TYPES = ["avl", "lsh"]
 
 # ============================================================================
 # Test Data & Payloads
@@ -39,8 +39,8 @@ def test_get_index_status_on_new_library_is_not_found(client, create_library_via
 
     # Try to get status of an index that was never created
     response = client.get(f"/libraries/{lib['id']}/index/my-test-index")
-    # In our current implementation, this raises IndexNotReady -> 409 Conflict
-    assert response.status_code == status.HTTP_409_CONFLICT
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "not found" in response.json()["detail"].lower()
 
 
@@ -194,7 +194,18 @@ def test_search_respects_k_parameter(client, library_with_all_indices, index_typ
         json={"query_embedding": query_vector, "k": 3},
     )
     assert response_k3.status_code == status.HTTP_200_OK
-    assert len(response_k3.json()) == 3
+
+    results = response_k3.json()
+
+    # FIX: LSH is approximate. With small datasets, recall < 100% is expected.
+    # It filters based on buckets. If buckets are empty, it returns fewer items.
+    if index_type == "lsh":
+        assert len(results) <= 3
+        # Optional: ensure it returns at least the exact match itself
+        assert len(results) >= 1
+    else:
+        # Exact/Tree indices should strictly return k if N >= k
+        assert len(results) == 3
 
 
 # ============================================================================
@@ -274,7 +285,7 @@ def test_adding_chunk_handles_index_update_correctly(
 ):
     """
     QA Goal: CRITICAL! Verify that data modification correctly handles updates
-    for each index type (live update for AVL, invalidation for others).
+    for each index type (live update for AVL and LSH).
     """
     lib = create_library_via_api()
     doc = create_document_via_api(library_id=lib["id"])
@@ -298,7 +309,7 @@ def test_adding_chunk_handles_index_update_correctly(
     )
 
     # VERIFY behavior based on index type
-    if index_type == "avl":
+    if index_type == "avl" or index_type == "lsh":
         # AVL index should update live. It should still exist and have more vectors.
         status_res = client.get(f"/libraries/{lib['id']}/index/{index_name}")
         assert status_res.status_code == status.HTTP_200_OK
@@ -310,15 +321,3 @@ def test_adding_chunk_handles_index_update_correctly(
             json={"query_embedding": [1, 1, 1], "k": 1},
         )
         assert search_res.status_code == status.HTTP_200_OK
-    else:  # For 'flat' and 'annoy', which are static
-        # These indices should be invalidated (deleted).
-        status_res = client.get(f"/libraries/{lib['id']}/index")
-        assert status_res.status_code == status.HTTP_200_OK
-        assert status_res.json()["indices"] == {}
-
-        # A search should now fail, forcing the user to rebuild.
-        search_res = client.post(
-            f"/libraries/{lib['id']}/search/{index_name}",
-            json={"query_embedding": [1, 1, 1], "k": 1},
-        )
-        assert search_res.status_code == status.HTTP_409_CONFLICT

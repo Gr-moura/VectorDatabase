@@ -23,3 +23,9 @@ class IndexNotReady(Exception):
     """Raised when a search is attempted on an un-built index."""
 
     pass
+
+
+class IndexNotFound(Exception):
+    """Raised when a specified index is not found in the library."""
+
+    pass

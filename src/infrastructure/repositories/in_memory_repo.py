@@ -5,7 +5,7 @@ from uuid import UUID
 from src.core.models import Library
 from src.core.exceptions import LibraryNotFound
 from .base_repo import ILibraryRepository
-from src.infrastructure.concurrency.rwlock import RWLock  # <--- Import
+from src.infrastructure.concurrency.rwlock import RWLock
 
 
 class InMemoryLibraryRepository(ILibraryRepository):
@@ -22,7 +22,6 @@ class InMemoryLibraryRepository(ILibraryRepository):
             if lib_copy.uid in self._data:
                 raise ValueError(f"Library with id {lib_copy.uid} already exists.")
 
-            # Store the COPY, not the reference
             self._data[lib_copy.uid] = lib_copy
 
     def update(self, library: Library) -> None:

@@ -87,8 +87,8 @@ To satisfy the requirement of preventing data races without an external DB:
 1.  **Clone the repository:**
 
     ```bash
-    git clone <repository-url>
-    cd vector_db_project
+    git clone https://github.com/Gr-moura/VectorDatabase
+    cd VectorDatabase
     ```
 
 2.  **Create a `.env` file:**

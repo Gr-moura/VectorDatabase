@@ -3,6 +3,7 @@
 from uuid import UUID
 from typing import List, Tuple, Dict, Set, Optional
 import numpy as np
+import heapq
 
 from src.core.models import Chunk
 from .base_index import VectorIndex
@@ -17,13 +18,16 @@ class LshIndex(VectorIndex):
     """
 
     def __init__(
-        self, num_bits: int = 8, num_tables: int = 3, seed: Optional[int] = None
+        self,
+        num_bits: int = 8,
+        num_tables: int = 3,
+        seed: Optional[int] = None,
     ):
         """
         Args:
         num_bits: Number of hyperplanes per table. Higher = fewer collisions (precision), lower recall.
-                num_tables: Number of independent hash tables. Higher = higher recall, more memory.
-                seed: Optional seed for reproducibility. If None, uses entropy from OS.
+        num_tables: Number of independent hash tables. Higher = higher recall, more memory.
+        seed: Optional seed for reproducibility. If None, uses entropy from OS.
         """
         self._num_bits = num_bits
         self._num_tables = num_tables
@@ -152,10 +156,7 @@ class LshIndex(VectorIndex):
 
     def search(self, query_embedding: List[float], k: int) -> List[Tuple[Chunk, float]]:
         """
-        Approximate search:
-        1. Hash query vector.
-        2. Collect candidates from matching buckets in all tables.
-        3. Brute-force re-rank candidates.
+        Approximate search using LSH buckets + Brute-force re-ranking with a Min-Heap.
         """
         if not self._planes or not self._vectors:
             return []
@@ -176,27 +177,32 @@ class LshIndex(VectorIndex):
         if not candidate_ids:
             return []
 
-        # 2. Re-rank Candidates (Exact distance on the subset)
+        # 2. Re-rank Candidates using Min-Heap
+        # Candidates list
         candidates = list(candidate_ids)
-        candidate_matrix = np.array([self._vectors[uid] for uid in candidates])
 
-        # Cosine similarity
-        scores = np.dot(candidate_matrix, query_vector)
+        # Min-heap to store (score, unique_id, chunk)
+        candidates_heap = []
 
-        # Sort top k
-        if len(scores) < k:
-            top_indices = np.argsort(scores)[::-1]
-        else:
-            # argpartition is faster for finding top k without full sort
-            top_indices = np.argpartition(scores, -k)[-k:]
-            # Sort the top k
-            top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+        for uid in candidates:
+            chunk = self._chunks[uid]
+            vector = self._vectors[uid]
 
-        # 3. Format Results
+            score = float(np.dot(vector, query_vector))
+
+            heapq.heappush(candidates_heap, (score, uid, chunk))
+
+            if len(candidates_heap) > k:
+                heapq.heappop(candidates_heap)
+
+        # 3. Sort and Format Results
+        # The heap contains the top-k, but unsorted (or sorted by min).
+        # We want descending order (highest score first).
         results = []
-        for idx in top_indices:
-            uid = candidates[idx]
-            score = scores[idx]
-            results.append((self._chunks[uid], float(score)))
+
+        sorted_candidates = sorted(candidates_heap, key=lambda x: x[0], reverse=True)
+
+        for score, _, chunk in sorted_candidates:
+            results.append((chunk, score))
 
         return results

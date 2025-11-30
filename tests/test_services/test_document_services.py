@@ -1,132 +1,243 @@
-# src/services/search_service.py
+# tests/test_services/test_document_services.py
+import pytest
+from uuid import uuid4, UUID
+from unittest.mock import Mock
 
-import logging
-from uuid import UUID
-from typing import List, Dict, Optional
+# Import the service modules under test
+from src.services import library_service, document_service, chunk_service
 
-from src.api.schemas import SearchResult, IndexCreate
-from src.infrastructure.repositories.base_repo import ILibraryRepository
-from src.core.indexing.index_factory import IndexFactory, IndexType
-from src.core.models import Chunk, Library, IndexMetadata, IndexConfig
-from src.core.exceptions import IndexNotReady, IndexNotFound
+# Import exceptions (these are referenced by the services)
+from src.core import exceptions as core_exceptions
 
-# Configure logger
-logger = logging.getLogger(__name__)
+from ..fakes import FakeLibrary, FakeDocument, FakeChunk, FakeSchema
 
 
-class SearchService:
-    def __init__(self, repository: ILibraryRepository):
-        self.repository = repository
+# -------------------------
+# Fixtures
+# -------------------------
+@pytest.fixture
+def repo_mock():
+    return Mock(spec=["add", "get_by_id", "update", "delete", "list_all"])
 
-    def create_index(self, library_id: UUID, index_name: str, api_config: IndexCreate):
-        """Creates an index and attaches it to the Library object in the repository."""
-        library = self.repository.get_by_id(library_id)
 
-        all_chunks: List[Chunk] = [
-            chunk
-            for document in library.documents.values()
-            for chunk in document.chunks.values()
-            if chunk.embedding
-        ]
+@pytest.fixture
+def embeddings_client_mock():
+    """Provides a mock for the embeddings client."""
+    mock = Mock(spec=["get_embeddings"])
+    mock.get_embeddings.return_value = [[0.1, 0.2, 0.3]]
+    return mock
 
-        # 1. Create the core IndexConfig object from the API's IndexCreate object.
-        core_config = IndexConfig(
-            index_type=api_config.index_type,
-            metric=api_config.metric,
-        )
 
-        # 2. Use the properties from the core_config to create the index.
-        index = IndexFactory.create_index(
-            index_type=core_config.index_type,
-            metric=core_config.metric,
-        )
+@pytest.fixture(autouse=True)
+def patch_models(monkeypatch):
+    """
+    Replaces real domain models with our fake classes inside the service modules
+    to ensure the services are unit tested in isolation.
+    """
+    monkeypatch.setattr(library_service, "Library", FakeLibrary)
+    monkeypatch.setattr(document_service, "Document", FakeDocument)
+    monkeypatch.setattr(document_service, "Chunk", FakeChunk)
+    monkeypatch.setattr(chunk_service, "Chunk", FakeChunk)
 
-        index.build(all_chunks)
 
-        metadata = IndexMetadata(
-            name=index_name,
-            config=core_config,
-            vector_count=len(all_chunks),
-            index_type=core_config.index_type.value,
-        )
+# -------------------------
+# Tests for DocumentService
+# -------------------------
+def test_create_document_adds_document_and_chunks(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    lib = FakeLibrary(uid=lib_id, documents={})
+    repo_mock.get_by_id.return_value = lib
 
-        # Attach the newly built index directly to the library object
-        library.indices[index_name] = index
-        library.index_metadata[index_name] = metadata
+    doc_uid = uuid4()
+    chunk_uid = uuid4()
+    # chunk schema is FakeSchema, as the service expects chunk_create.model_dump()
+    doc_schema = FakeSchema(
+        {
+            "uid": doc_uid,
+            "title": "doc1",
+            "chunks": [FakeSchema({"uid": chunk_uid, "text": "hello"})],
+        }
+    )
 
-        # Save the library with its new index back to the repository
-        self.repository.update(library)
+    created = svc.create_document(lib_id, doc_schema)
 
-        logger.info(
-            f"Index of type '{core_config.index_type.value}' created and attached to library {library_id} with name '{index_name}'."
-        )
+    # library should have the new document (either in lib.documents or created returned)
+    assert created.uid == doc_uid
+    repo_mock.update.assert_called_once_with(lib)
+    assert isinstance(created, FakeDocument)
 
-    def get_index_status(self, library_id: UUID, index_name: str) -> IndexMetadata:
-        """Checks the status of a specific named index."""
-        library = self.repository.get_by_id(library_id)
-        metadata = library.index_metadata.get(index_name)
-        if not metadata:
-            raise IndexNotFound(
-                f"Index with name '{index_name}' not found in library {library_id}."
-            )
-        return metadata
 
-    def list_all_indices(self, library_id: UUID) -> Dict[str, IndexMetadata]:
-        """Lists all indices and their metadata for a given library."""
-        library = self.repository.get_by_id(library_id)
-        return library.index_metadata
+def test_get_document_not_found_raises(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    lib = FakeLibrary(uid=lib_id, documents={})
+    repo_mock.get_by_id.return_value = lib
 
-    def delete_index(self, library_id: UUID, index_name: str):
-        """Deletes a named index from a library."""
-        library = self.repository.get_by_id(library_id)
+    with pytest.raises(core_exceptions.DocumentNotFound):
+        svc.get_document(lib_id, uuid4())
 
-        if index_name not in library.index_metadata:
-            # Corrected exception: The resource does not exist, so it's not 'NotReady'
-            raise IndexNotFound(
-                f"Index with name '{index_name}' not found in library {library_id}."
-            )
 
-        library.indices.pop(index_name, None)
-        library.index_metadata.pop(index_name, None)
-        self.repository.update(library)
+def test_get_document_returns_document(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    doc_id = uuid4()
+    doc = FakeDocument(uid=doc_id)
+    lib = FakeLibrary(uid=lib_id, documents={doc_id: doc})
+    repo_mock.get_by_id.return_value = lib
 
-        logger.info(f"Index '{index_name}' deleted from library {library_id}.")
+    got = svc.get_document(lib_id, doc_id)
+    assert got is doc
 
-    def search_chunks(
-        self, library_id: UUID, index_name: str, query_embedding: List[float], k: int
-    ) -> List[SearchResult]:
-        """
-        Performs a search using the index attached to the library.
-        """
-        library = self.repository.get_by_id(library_id)
-        index = library.indices.get(index_name)
 
-        if not index:
-            raise IndexNotReady(
-                f"Index '{index_name}' is not ready for search. It may need to be rebuilt."
-            )
+def test_list_documents_returns_all(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    doc1 = FakeDocument(uid=uuid4())
+    doc2 = FakeDocument(uid=uuid4())
+    lib = FakeLibrary(uid=lib_id, documents={doc1.uid: doc1, doc2.uid: doc2})
+    repo_mock.get_by_id.return_value = lib
 
-        # Raw results from the index (might contain stale objects)
-        raw_results = index.search(query_embedding, k)
+    out = svc.list_documents(lib_id)
+    assert set(out) == {doc1, doc2}
 
-        validated_results: List[SearchResult] = []
 
-        for index_chunk, score in raw_results:
-            found_chunk: Optional[Chunk] = None
+def test_update_document_merges_and_updates(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    doc_id = uuid4()
+    doc = FakeDocument(uid=doc_id, title="old")
+    lib = FakeLibrary(uid=lib_id, documents={doc_id: doc})
+    repo_mock.get_by_id.return_value = lib
 
-            for document in library.documents.values():
-                if index_chunk.uid in document.chunks:
-                    found_chunk = document.chunks[index_chunk.uid]
-                    break
+    update_schema = FakeSchema({"title": "new"})
+    updated = svc.update_document(lib_id, doc_id, update_schema)
 
-            if found_chunk:
-                validated_results.append(
-                    SearchResult(chunk=found_chunk, similarity=score)
-                )
-            else:
-                logger.warning(
-                    f"Data Inconsistency: Chunk {index_chunk.uid} found in index '{index_name}' "
-                    f"but missing from Library {library_id}. Triggering index rebuild is recommended."
-                )
+    repo_mock.update.assert_called_once_with(lib)
+    assert isinstance(updated, FakeDocument)
+    assert updated.title == "new"
+    assert lib.documents[doc_id] is updated
 
-        return validated_results
+
+def test_delete_document_deletes_and_updates_repo(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    doc_id = uuid4()
+    doc = FakeDocument(uid=doc_id)
+    lib = FakeLibrary(uid=lib_id, documents={doc_id: doc})
+    repo_mock.get_by_id.return_value = lib
+
+    svc.delete_document(lib_id, doc_id)
+    assert doc_id not in lib.documents
+    repo_mock.update.assert_called_once_with(lib)
+
+
+def test_delete_document_missing_raises(repo_mock, embeddings_client_mock):
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    lib = FakeLibrary(uid=lib_id, documents={})
+    repo_mock.get_by_id.return_value = lib
+
+    with pytest.raises(core_exceptions.DocumentNotFound):
+        svc.delete_document(lib_id, uuid4())
+
+
+def test_create_document_generates_embeddings_for_nested_chunks(
+    repo_mock, embeddings_client_mock
+):
+    """
+    Verify that creating a document with chunks triggers batch embedding generation.
+    """
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+    fake_lib = FakeLibrary(uid=lib_id, documents={}, indices={}, index_metadata={})
+    repo_mock.get_by_id.return_value = fake_lib
+
+    # Configure the mock to return embeddings for our batch
+    # We are sending 2 chunks, so we expect 2 vectors back
+    embeddings_client_mock.get_embeddings.return_value = [[0.1, 0.1], [0.2, 0.2]]
+
+    doc_uid = uuid4()
+    doc_schema = FakeSchema(
+        {
+            "uid": doc_uid,
+            "title": "My Doc",
+            "chunks": [
+                FakeSchema({"text": "chunk A"}),
+                FakeSchema({"text": "chunk B"}),
+            ],
+        }
+    )
+
+    created_doc = svc.create_document(lib_id, doc_schema)
+
+    # 1. Verify client call
+    # It should call get_embeddings ONCE with a list of BOTH texts
+    embeddings_client_mock.get_embeddings.assert_called_once_with(
+        ["chunk A", "chunk B"]
+    )
+
+    # 2. Verify embeddings were assigned
+    # Note: created_doc.chunks is a dict {uid: Chunk}
+    chunks_list = list(created_doc.chunks.values())
+    assert len(chunks_list) == 2
+
+    # Sort by text to ensure we check the right ones (since dict order can vary)
+    chunks_list.sort(key=lambda c: c.text)
+
+    assert chunks_list[0].text == "chunk A"
+    assert chunks_list[0].embedding == [0.1, 0.1]
+
+    assert chunks_list[1].text == "chunk B"
+    assert chunks_list[1].embedding == [0.2, 0.2]
+
+
+def test_create_document_updates_indices_for_nested_chunks(
+    repo_mock, embeddings_client_mock
+):
+    """
+    Verify that creating a document also updates the library's indices.
+    """
+    svc = document_service.DocumentService(
+        repository=repo_mock, embeddings_client=embeddings_client_mock
+    )
+    lib_id = uuid4()
+
+    # Setup a library with an AVL index
+    # We use a real AvlIndex here to verify the insertion logic
+    from src.core.indexing.avl_index import AvlIndex
+
+    avl_index = AvlIndex()
+    fake_lib = FakeLibrary(
+        uid=lib_id,
+        documents={},
+        indices={"my-avl": avl_index},
+        index_metadata={"my-avl": Mock(vector_count=0)},  # Mock metadata
+    )
+    repo_mock.get_by_id.return_value = fake_lib
+    embeddings_client_mock.get_embeddings.return_value = [[0.1], [0.2]]
+
+    doc_schema = FakeSchema(
+        {"chunks": [FakeSchema({"text": "A"}), FakeSchema({"text": "B"})]}
+    )
+
+    svc.create_document(lib_id, doc_schema)
+
+    # Verify the index actually received the vectors
+    assert avl_index.vector_count == 2

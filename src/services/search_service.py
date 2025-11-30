@@ -8,9 +8,9 @@ from src.api.schemas import SearchResult, IndexCreate
 from src.infrastructure.repositories.base_repo import ILibraryRepository
 from src.core.indexing.index_factory import IndexFactory, IndexType
 from src.core.models import Chunk, Library, IndexMetadata, IndexConfig
-from src.core.exceptions import IndexNotFound, IndexNotReady
+from src.core.exceptions import IndexNotReady, IndexNotFound
 
-# Configure logger for production observability
+# Configure logger
 logger = logging.getLogger(__name__)
 
 
@@ -58,10 +58,10 @@ class SearchService:
         self.repository.update(library)
 
         logger.info(
-            f"Index of type '{core_config.index_type.value}' attached to library {library_id}."
+            f"Index of type '{core_config.index_type.value}' created and attached to library {library_id} with name '{index_name}'."
         )
 
-    def get_index_status(self, library_id: UUID, index_name: str) -> dict:
+    def get_index_status(self, library_id: UUID, index_name: str) -> IndexMetadata:
         """Checks the status of a specific named index."""
         library = self.repository.get_by_id(library_id)
         metadata = library.index_metadata.get(index_name)
@@ -81,6 +81,7 @@ class SearchService:
         library = self.repository.get_by_id(library_id)
 
         if index_name not in library.index_metadata:
+            # Corrected exception: The resource does not exist, so it's not 'NotReady'
             raise IndexNotFound(
                 f"Index with name '{index_name}' not found in library {library_id}."
             )
@@ -88,6 +89,7 @@ class SearchService:
         library.indices.pop(index_name, None)
         library.index_metadata.pop(index_name, None)
         self.repository.update(library)
+
         logger.info(f"Index '{index_name}' deleted from library {library_id}.")
 
     def search_chunks(
@@ -104,28 +106,27 @@ class SearchService:
                 f"Index '{index_name}' is not ready for search. It may need to be rebuilt."
             )
 
-        # 1. Get raw candidates from the index (these contain copied/stale data)
+        # Raw results from the index (might contain stale objects)
         raw_results = index.search(query_embedding, k)
 
-        results: List[SearchResult] = []
+        validated_results: List[SearchResult] = []
 
-        # 2. Re-hydrate against the Library to ensure consistency
         for index_chunk, score in raw_results:
             found_chunk: Optional[Chunk] = None
 
-            # Note: This linear lookup is O(N) on documents.
-            # Optimization: A lookup map {chunk_id: doc_id} in Library would make this O(1).
-            for doc in library.documents.values():
-                if index_chunk.uid in doc.chunks:
-                    found_chunk = doc.chunks[index_chunk.uid]
+            for document in library.documents.values():
+                if index_chunk.uid in document.chunks:
+                    found_chunk = document.chunks[index_chunk.uid]
                     break
 
             if found_chunk:
-                # Return the fresh object from the library, not the stale one from index
-                results.append(SearchResult(chunk=found_chunk, similarity=score))
+                validated_results.append(
+                    SearchResult(chunk=found_chunk, similarity=score)
+                )
             else:
                 logger.warning(
-                    f"Consistency Error: Chunk {index_chunk.uid} found in index but missing from Library."
+                    f"Data Inconsistency: Chunk {index_chunk.uid} found in index '{index_name}' "
+                    f"but missing from Library {library_id}. Triggering index rebuild is recommended."
                 )
 
-        return results
+        return validated_results

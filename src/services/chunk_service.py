@@ -1,4 +1,4 @@
-# vector_db_project/src/services/chunk_service.py
+# src/services/chunk_service.py
 
 from uuid import UUID
 from typing import List

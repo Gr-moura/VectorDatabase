@@ -22,7 +22,7 @@ class FakeEmbeddingsClient(IEmbeddingsClient):
             "computer": [0.1, 0.9, 0.1],
         }
 
-        # Fix 3: Filter known embeddings to ensure dimension consistency
+        # Filter known embeddings to ensure dimension consistency
         self.known_embeddings: Dict[str, List[float]] = {}
         for text, vec in raw_known.items():
             if len(vec) == self.dimension:

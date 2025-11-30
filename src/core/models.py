@@ -73,6 +73,8 @@ class Library(BaseModel):
 
     _indices: Dict[str, "VectorIndex"] = PrivateAttr(default_factory=dict)
 
+    version: int = Field(default=1, description="Optimistic locking version")
+
     @property
     def indices(self) -> Dict[str, "VectorIndex"]:
         """Exposes the internal runtime indices safely."""

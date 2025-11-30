@@ -1,4 +1,4 @@
-# vector_db_project/src/core/exceptions.py
+# src/core/exceptions.py
 
 
 class LibraryNotFound(Exception):

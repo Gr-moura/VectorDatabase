@@ -169,7 +169,7 @@ def test_search_chunks_with_text_query(
     search_service, mock_repo, mock_embeddings_client
 ):
     """
-    Testa se o serviço gera o embedding quando recebe texto e chama o índice corretamente.
+    Tests if the service generates the embedding when it receives text and calls the index correctly.
     """
     lib_id = uuid4()
     chunk = FakeChunk()

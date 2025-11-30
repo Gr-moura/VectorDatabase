@@ -1,4 +1,4 @@
-# vector_db_project/src/services/library_service.py
+# src/services/library_service.py
 
 from uuid import UUID
 from typing import List

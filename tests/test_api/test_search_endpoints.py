@@ -198,11 +198,10 @@ def test_search_respects_k_parameter(client, library_with_all_indices, index_typ
 
     results = response_k3.json()
 
-    # FIX: LSH is approximate. With small datasets, recall < 100% is expected.
+    # LSH is approximate. With small datasets, recall < 100% is expected.
     # It filters based on buckets. If buckets are empty, it returns fewer items.
     if index_type == "lsh":
         assert len(results) <= 3
-        # Optional: ensure it returns at least the exact match itself
         assert len(results) >= 1
     else:
         # Exact/Tree indices should strictly return k if N >= k
@@ -261,9 +260,6 @@ def test_search_fails_if_index_not_created(
         f"/libraries/{lib['id']}/search/non-existent-index", json=search_payload
     )
 
-    # Depending on implementation details, this might be 404 (IndexNotFound) or 409 (IndexNotReady)
-    # Based on previous context, we corrected it to NotReady in Service, handled as 409.
-    # If the service raises IndexNotReady -> 409 Conflict
     assert response.status_code == status.HTTP_409_CONFLICT
     assert "not ready for search" in response.json()["detail"].lower()
 
@@ -320,7 +316,7 @@ def test_adding_chunk_handles_index_update_correctly(
     create_index_via_api,
 ):
     """
-    QA Goal: CRITICAL! Verify that data modification correctly handles updates
+    QA Goal: Verify that data modification correctly handles updates
     for each index type (live update for AVL and LSH).
     """
     lib = create_library_via_api()

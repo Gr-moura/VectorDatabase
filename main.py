@@ -49,7 +49,7 @@ async def index_not_ready_exception_handler(request: Request, exc: IndexNotReady
 @app.exception_handler(IndexNotFound)
 async def index_not_found_handler(request: Request, exc: IndexNotFound):
     return JSONResponse(
-        status_code=404,
+        status_code=status.HTTP_404_NOT_FOUND,
         content={"detail": str(exc)},
     )
 

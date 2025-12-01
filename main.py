@@ -1,6 +1,5 @@
 # main.py
 
-import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
@@ -92,8 +91,3 @@ app.include_router(search.router, tags=["Search"])
 @app.get("/", tags=["Root"])
 def read_root():
     return {"message": "Welcome to the Vector DB API"}
-
-
-# Optional: Add a main block to run the app with uvicorn for easy development
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)

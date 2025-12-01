@@ -140,7 +140,7 @@ class SearchService:
             )
 
         # 4. Perform Search
-        # Pass the resolved query_vector (not the raw optional argument)
+        # Pass the resolved query_vector
         try:
             raw_results = index.search(query_vector, k)
         except ValueError as e:
